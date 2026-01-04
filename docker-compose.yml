@@ -1,6 +1,7 @@
 services:
   db:
     image: postgres:15
+    container_name: db  # <--- Nome personalizzato
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -10,7 +11,9 @@ services:
       - ./postgres_data:/var/lib/postgresql/data
 
   backend:
-    build: .
+    build: 
+      context: ./BE
+    container_name: spese-backend-api  # <--- Nome personalizzato
     restart: always
     ports:
       - "8000:8000"
