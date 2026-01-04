@@ -47,16 +47,23 @@ def read_root():
 
 @app.post("/register", response_model=schemas.UserOut)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # 1. Controlla se l'utente esiste già
-    db_user = db.query(models.User).filter(models.User.email == user.email).first()
+    # 1. Controlla se email o username esistono già
+    db_user = db.query(models.User).filter(
+        (models.User.email == user.email) | (models.User.username == user.username)
+    ).first()
+    
     if db_user:
-        raise HTTPException(status_code=400, detail="Email già registrata")
+        raise HTTPException(status_code=400, detail="Email o Username già registrati")
     
     # 2. Hash della password
     hashed_pwd = auth.get_password_hash(user.password)
     
-    # 3. Crea l'utente
-    new_user = models.User(email=user.email, hashed_password=hashed_pwd)
+    # 3. Crea l'utente includendo lo username
+    new_user = models.User(
+        email=user.email, 
+        username=user.username, # <--- Passiamo lo username
+        hashed_password=hashed_pwd
+    )
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
