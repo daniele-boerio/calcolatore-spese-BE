@@ -11,8 +11,7 @@ services:
       - ./postgres_data:/var/lib/postgresql/data
 
   backend:
-    build: 
-      context: .
+    build: .
     container_name: spese-backend-api  # <--- Nome personalizzato
     restart: always
     ports:
