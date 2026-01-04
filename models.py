@@ -12,8 +12,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     
     # Relazioni
-    conti = relationship("Conto", back_populates="users")
-    categorie = relationship("Categoria", back_populates="users")
+    conti = relationship("Conto", back_populates="owner")
+    categorie = relationship("Categoria", back_populates="owner")
 
 class Conto(Base):
     __tablename__ = "conti"
@@ -22,7 +22,7 @@ class Conto(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     
     owner = relationship("User", back_populates="conti")
-    transazioni = relationship("Transazione", back_populates="conti")
+    transazioni = relationship("Transazione", back_populates="conto")
 
 class Categoria(Base):
     __tablename__ = "categorie"
