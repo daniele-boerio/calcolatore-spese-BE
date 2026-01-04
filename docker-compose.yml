@@ -12,7 +12,7 @@ services:
 
   backend:
     build: 
-      context: ./BE
+      context: .
     container_name: spese-backend-api  # <--- Nome personalizzato
     restart: always
     ports:
