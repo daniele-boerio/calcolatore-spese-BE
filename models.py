@@ -2,10 +2,12 @@ from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boo
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
+from sqlalchemy.orm import relationship, backref
 
 class User(Base):
     __tablename__ = "users"
     id = Column(Integer, primary_key=True, index=True)
+    username = Column(String, unique=False, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     
@@ -17,7 +19,6 @@ class Conto(Base):
     __tablename__ = "conti"
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False) # es. Contanti, Intesa, Revolut
-    tipo = Column(String) # es. Bancario, Wallet
     user_id = Column(Integer, ForeignKey("users.id"))
     
     owner = relationship("User", back_populates="conti")
@@ -25,14 +26,24 @@ class Conto(Base):
 
 class Categoria(Base):
     __tablename__ = "categorie"
+    
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
-    # Per le sottocategorie: una categoria può avere un "parent_id" che punta a un'altra categoria
-    parent_id = Column(Integer, ForeignKey("categorie.id"), nullable=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-
-    owner = relationship("User", back_populates="categorie")
-    subcategories = relationship("Categoria")
+    
+    # Se questo è NULL, è una categoria principale. 
+    # Se contiene un ID, è una sottocategoria.
+    parent_id = Column(Integer, ForeignKey("categorie.id"), nullable=True)
+    
+    # Relazioni
+    user = relationship("User")
+    
+    # Questa riga crea la gerarchia
+    subcategorie = relationship(
+        "Categoria", 
+        backref=backref('parent', remote_side=[id]),
+        cascade="all, delete-orphan" # Se cancelli il padre, cancella le sottocategorie
+    )
 
 class Transazione(Base):
     __tablename__ = "transazioni"
