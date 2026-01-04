@@ -70,46 +70,6 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = auth.create_access_token(data={"user_id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
 
-@app.post("/spesa", response_model=schemas.TransazioneOut)
-def create_spesa(
-    spesa: schemas.TransazioneCreate, 
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    # 1. Verifica di sicurezza: il conto indicato appartiene all'utente?
-    conto = db.query(models.Conto).filter(
-        models.Conto.id == spesa.conto_id, 
-        models.Conto.user_id == current_user_id
-    ).first()
-    
-    if not conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato o non autorizzato")
-
-    # 2. Creazione della spesa (forziamo il tipo a "USCITA" se è l'endpoint specifico per le spese)
-    new_spesa = models.Transazione(
-        importo=spesa.importo,
-        tipo="USCITA",
-        descrizione=spesa.descrizione,
-        conto_id=spesa.conto_id,
-        categoria_id=spesa.categoria_id,
-        data=spesa.data
-    )
-    
-    db.add(new_spesa)
-    db.commit()
-    db.refresh(new_spesa)
-    return new_spesa
-
-@app.get("/transazioni", response_model=list[schemas.TransazioneOut])
-def get_transazioni(
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    # Recuperiamo tutte le transazioni filtrando attraverso i conti dell'utente
-    return db.query(models.Transazione).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id
-    ).all()
-
 @app.post("/conti", response_model=schemas.ContoOut)
 def create_conto(
     conto: schemas.ContoCreate, 
@@ -169,6 +129,16 @@ def create_transazione(
     db.commit()
     db.refresh(new_transazione)
     return new_transazione
+
+@app.get("/transazioni", response_model=list[schemas.TransazioneOut])
+def get_transazioni(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Recuperiamo tutte le transazioni filtrando attraverso i conti dell'utente
+    return db.query(models.Transazione).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id
+    ).all()
 
 # --- ENDPOINT INVESTIMENTI ---
 
