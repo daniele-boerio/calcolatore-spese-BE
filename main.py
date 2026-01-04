@@ -100,6 +100,16 @@ def create_spesa(
     db.refresh(new_spesa)
     return new_spesa
 
+@app.get("/transazioni", response_model=list[schemas.TransazioneOut])
+def get_transazioni(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Recuperiamo tutte le transazioni filtrando attraverso i conti dell'utente
+    return db.query(models.Transazione).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id
+    ).all()
+
 @app.post("/conti", response_model=schemas.ContoOut)
 def create_conto(
     conto: schemas.ContoCreate, 
@@ -112,6 +122,13 @@ def create_conto(
     db.refresh(new_conto)
     return new_conto
 
+@app.get("/conti", response_model=list[schemas.ContoOut])
+def get_conti(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
+
 @app.post("/categorie", response_model=schemas.CategoriaOut)
 def create_categoria(
     categoria: schemas.CategoriaCreate, 
@@ -123,6 +140,13 @@ def create_categoria(
     db.commit()
     db.refresh(new_cat)
     return new_cat
+
+@app.get("/categorie", response_model=list[schemas.CategoriaOut])
+def get_categorie(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    return db.query(models.Categoria).filter(models.Categoria.user_id == current_user_id).all()
 
 @app.post("/transazioni", response_model=schemas.TransazioneOut)
 def create_transazione(
