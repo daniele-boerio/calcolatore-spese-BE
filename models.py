@@ -12,8 +12,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     
     # Relazioni
-    conti = relationship("Conto", back_populates="owner")
-    categorie = relationship("Categoria", back_populates="owner")
+    conti = relationship("Conto", back_populates="users")
+    categorie = relationship("Categoria", back_populates="users")
 
 class Conto(Base):
     __tablename__ = "conti"
@@ -22,7 +22,7 @@ class Conto(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     
     owner = relationship("User", back_populates="conti")
-    transazioni = relationship("Transazione", back_populates="conto")
+    transazioni = relationship("Transazione", back_populates="conti")
 
 class Categoria(Base):
     __tablename__ = "categorie"
@@ -36,7 +36,7 @@ class Categoria(Base):
     parent_id = Column(Integer, ForeignKey("categorie.id"), nullable=True)
     
     # Relazioni
-    user = relationship("User")
+    owner = relationship("User", back_populates="categorie")
     
     # Questa riga crea la gerarchia
     subcategorie = relationship(
