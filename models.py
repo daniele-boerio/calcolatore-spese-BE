@@ -81,4 +81,4 @@ class StoricoInvestimento(Base):
     quantita = Column(Float) # Positiva per acquisto, negativa per vendita
     prezzo_unitario = Column(Float)
     valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
-    investimento = relationship("Investimento", back_populates="storico", cascade="all, delete-orphan")
+    investimento = relationship("Investimento", back_populates="storico")
