@@ -76,10 +76,9 @@ class Investimento(Base):
 class StoricoInvestimento(Base):
     __tablename__ = "storico_investimenti"
     id = Column(Integer, primary_key=True, index=True)
-    investimento_id = Column(Integer, ForeignKey("investimenti.id"))
+    investimento_id = Column(Integer, ForeignKey("investimenti.id", ondelete="CASCADE"))
     data = Column(Date, nullable=False)
     quantita = Column(Float) # Positiva per acquisto, negativa per vendita
     prezzo_unitario = Column(Float)
     valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
-
-    storico = relationship("StoricoInvestimento", back_populates="investimento", cascade="all, delete-orphan")
+    investimento = relationship("Investimento", back_populates="storico", cascade="all, delete-orphan")
