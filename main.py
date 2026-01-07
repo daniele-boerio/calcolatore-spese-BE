@@ -324,3 +324,88 @@ def add_operazione_investimento(
     db.commit()
     db.refresh(new_record)
     return new_record
+
+@app.put("/investimenti/operazione/{operazione_id}", response_model=schemas.StoricoInvestimentoOut)
+def update_operazione_investimento(
+    operazione_id: int,
+    operazione_data: schemas.StoricoInvestimentoCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Verifichiamo che l'operazione esista e che l'investimento collegato appartenga all'utente
+    db_operazione = db.query(models.StoricoInvestimento).join(models.Investimento).filter(
+        models.StoricoInvestimento.id == operazione_id,
+        models.Investimento.user_id == current_user_id
+    ).first()
+
+    if not db_operazione:
+        raise HTTPException(status_code=404, detail="Operazione non trovata o non autorizzata")
+
+    # Aggiorniamo i dati
+    for key, value in operazione_data.dict().items():
+        setattr(db_operazione, key, value)
+
+    db.commit()
+    db.refresh(db_operazione)
+    return db_operazione
+
+@app.delete("/investimenti/operazione/{operazione_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operazione_investimento(
+    operazione_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_operazione = db.query(models.StoricoInvestimento).join(models.Investimento).filter(
+        models.StoricoInvestimento.id == operazione_id,
+        models.Investimento.user_id == current_user_id
+    ).first()
+
+    if not db_operazione:
+        raise HTTPException(status_code=404, detail="Operazione non trovata")
+
+    db.delete(db_operazione)
+    db.commit()
+    return None
+
+@app.put("/investimenti/{investimento_id}", response_model=schemas.InvestimentoOut)
+def update_investimento(
+    investimento_id: int,
+    investimento_data: schemas.InvestimentoCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_investimento = db.query(models.Investimento).filter(
+        models.Investimento.id == investimento_id,
+        models.Investimento.user_id == current_user_id
+    ).first()
+
+    if not db_investimento:
+        raise HTTPException(status_code=404, detail="Investimento non trovato")
+
+    for key, value in investimento_data.dict().items():
+        setattr(db_investimento, key, value)
+
+    db.commit()
+    db.refresh(db_investimento)
+    return db_investimento
+
+@app.delete("/investimenti/{investimento_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_investimento(
+    investimento_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_investimento = db.query(models.Investimento).filter(
+        models.Investimento.id == investimento_id,
+        models.Investimento.user_id == current_user_id
+    ).first()
+
+    if not db_investimento:
+        raise HTTPException(status_code=404, detail="Investimento non trovato")
+
+    # Grazie al cascade="all, delete-orphan" impostato nel modello, 
+    # cancellando l'investimento verranno cancellate automaticamente 
+    # anche tutte le sue operazioni nello storico.
+    db.delete(db_investimento)
+    db.commit()
+    return None
