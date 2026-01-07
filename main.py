@@ -45,6 +45,8 @@ def start_scheduler():
 def read_root():
     return {"message": "Il backend del Calcolatore Spese è attivo!"}
 
+# --- ENDPOINT UTENTI ---
+
 @app.post("/register", response_model=schemas.UserOut)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     # 1. Controlla se email o username esistono già
@@ -83,6 +85,8 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     access_token = auth.create_access_token(data={"user_id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
 
+# --- ENDPOINT CONTI ---
+
 @app.post("/conti", response_model=schemas.ContoOut)
 def create_conto(
     conto: schemas.ContoCreate, 
@@ -102,6 +106,50 @@ def get_conti(
 ):
     return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
 
+@app.put("/conti/{conto_id}", response_model=schemas.ContoOut)
+def update_conto(
+    conto_id: int, 
+    conto_data: schemas.ContoCreate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_conto = db.query(models.Conto).filter(
+        models.Conto.id == conto_id, 
+        models.Conto.user_id == current_user_id
+    ).first()
+
+    if not db_conto:
+        raise HTTPException(status_code=404, detail="Conto non trovato")
+
+    for key, value in conto_data.dict().items():
+        setattr(db_conto, key, value)
+
+    db.commit()
+    db.refresh(db_conto)
+    return db_conto
+
+@app.delete("/conti/{conto_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conto(
+    conto_id: int, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_conto = db.query(models.Conto).filter(
+        models.Conto.id == conto_id, 
+        models.Conto.user_id == current_user_id
+    ).first()
+
+    if not db_conto:
+        raise HTTPException(status_code=404, detail="Conto non trovato")
+
+    # Nota: se elimini un conto, le transazioni collegate verranno eliminate 
+    # se hai impostato il 'cascade delete' nei modelli.
+    db.delete(db_conto)
+    db.commit()
+    return None
+
+# --- ENDPOINT CATEGORIE ---
+
 @app.post("/categorie", response_model=schemas.CategoriaOut)
 def create_categoria(
     categoria: schemas.CategoriaCreate, 
@@ -120,6 +168,48 @@ def get_categorie(
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
     return db.query(models.Categoria).filter(models.Categoria.user_id == current_user_id).all()
+
+@app.put("/categorie/{categoria_id}", response_model=schemas.CategoriaOut)
+def update_categoria(
+    categoria_id: int, 
+    cat_data: schemas.CategoriaCreate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id, 
+        models.Categoria.user_id == current_user_id
+    ).first()
+
+    if not db_cat:
+        raise HTTPException(status_code=404, detail="Categoria non trovata")
+
+    for key, value in cat_data.dict().items():
+        setattr(db_cat, key, value)
+
+    db.commit()
+    db.refresh(db_cat)
+    return db_cat
+
+@app.delete("/categorie/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_categoria(
+    categoria_id: int, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id, 
+        models.Categoria.user_id == current_user_id
+    ).first()
+
+    if not db_cat:
+        raise HTTPException(status_code=404, detail="Categoria non trovata")
+
+    db.delete(db_cat)
+    db.commit()
+    return None
+
+# --- ENDPOINT TRANSAZIONI ---
 
 @app.post("/transazioni", response_model=schemas.TransazioneOut)
 def create_transazione(
@@ -152,6 +242,47 @@ def get_transazioni(
     return db.query(models.Transazione).join(models.Conto).filter(
         models.Conto.user_id == current_user_id
     ).all()
+
+@app.put("/transazioni/{transazione_id}", response_model=schemas.TransazioneOut)
+def update_transazione(
+    transazione_id: int, 
+    transazione_data: schemas.TransazioneCreate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Verifichiamo che la transazione esista e appartenga all'utente (tramite il conto)
+    db_transazione = db.query(models.Transazione).join(models.Conto).filter(
+        models.Transazione.id == transazione_id, 
+        models.Conto.user_id == current_user_id
+    ).first()
+
+    if not db_transazione:
+        raise HTTPException(status_code=404, detail="Transazione non trovata")
+
+    for key, value in transazione_data.dict().items():
+        setattr(db_transazione, key, value)
+
+    db.commit()
+    db.refresh(db_transazione)
+    return db_transazione
+
+@app.delete("/transazioni/{transazione_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_transazione(
+    transazione_id: int, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    db_transazione = db.query(models.Transazione).join(models.Conto).filter(
+        models.Transazione.id == transazione_id, 
+        models.Conto.user_id == current_user_id
+    ).first()
+
+    if not db_transazione:
+        raise HTTPException(status_code=404, detail="Transazione non trovata")
+
+    db.delete(db_transazione)
+    db.commit()
+    return None
 
 # --- ENDPOINT INVESTIMENTI ---
 

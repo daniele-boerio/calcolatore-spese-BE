@@ -12,8 +12,9 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     
     # Relazioni
-    conti = relationship("Conto", back_populates="owner")
-    categorie = relationship("Categoria", back_populates="owner")
+    conti = relationship("Conto", back_populates="owner", cascade="all, delete-orphan")
+    categorie = relationship("Categoria", back_populates="owner", cascade="all, delete-orphan")
+    investimenti = relationship("Investimento", cascade="all, delete-orphan")
 
 class Conto(Base):
     __tablename__ = "conti"
@@ -22,7 +23,7 @@ class Conto(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     
     owner = relationship("User", back_populates="conti")
-    transazioni = relationship("Transazione", back_populates="conto")
+    transazioni = relationship("Transazione", back_populates="conto", cascade="all, delete-orphan")
 
 class Categoria(Base):
     __tablename__ = "categorie"
@@ -53,8 +54,8 @@ class Transazione(Base):
     data = Column(DateTime, default=datetime.utcnow)
     descrizione = Column(String)
     
-    conto_id = Column(Integer, ForeignKey("conti.id"))
-    categoria_id = Column(Integer, ForeignKey("categorie.id"))
+    conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
+    categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
     
     conto = relationship("Conto", back_populates="transazioni")
 
@@ -81,4 +82,4 @@ class StoricoInvestimento(Base):
     prezzo_unitario = Column(Float)
     valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
 
-    investimento = relationship("Investimento", back_populates="storico")
+    storico = relationship("StoricoInvestimento", back_populates="investimento", cascade="all, delete-orphan")
