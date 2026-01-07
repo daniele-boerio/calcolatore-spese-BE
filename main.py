@@ -20,15 +20,9 @@ app = FastAPI(
     version="1.0.0"
 )
 
-origins = [
-    "http://localhost:5173",    # Il tuo Frontend in sviluppo con Vite
-    "http://127.0.0.1:5173",
-    "https://spassoconto.duckdns.org", # Il tuo dominio (se il FE girerà lì)
-]
-
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,       # Permette solo a queste origini di parlare col BE
+    allow_origins=["*"],       # Permette solo a queste origini di parlare col BE
     allow_credentials=True,
     allow_methods=["*"],         # Permette tutti i metodi (GET, POST, OPTIONS, ecc.)
     allow_headers=["*"],         # Permette tutti gli header (incluso Authorization)
