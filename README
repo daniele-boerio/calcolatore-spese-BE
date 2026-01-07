@@ -1,0 +1,4 @@
+- andare nella cartella dove è presente il servizio
+- git pull
+- docker compose up -d --build per re-buildare il servizio
+- docker logs -f spese-backend-api per visionare i log del servizio
