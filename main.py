@@ -69,7 +69,13 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         raise HTTPException(status_code=403, detail="Password errata. Riprova.")
     
     access_token = auth.create_access_token(data={"user_id": user.id})
-    return {"access_token": access_token, "token_type": "bearer"}
+    
+    # Restituiamo il token insieme all'username recuperato dal DB
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "username": user.username # <--- Campo aggiunto
+    }
 
 # --- ENDPOINT CONTI ---
 
