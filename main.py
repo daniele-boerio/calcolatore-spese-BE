@@ -43,23 +43,16 @@ def read_root():
 
 @app.post("/register", response_model=schemas.UserOut)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # 1. Controlla se email o username esistono già
-    db_user = db.query(models.User).filter(
-        (models.User.email == user.email) | (models.User.username == user.username)
-    ).first()
+    # Controllo specifico per Email
+    if db.query(models.User).filter(models.User.email == user.email).first():
+        raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
     
-    if db_user:
-        raise HTTPException(status_code=400, detail="Email o Username già registrati")
+    # Controllo specifico per Username
+    if db.query(models.User).filter(models.User.username == user.username).first():
+        raise HTTPException(status_code=400, detail="Lo username scelto non è disponibile.")
     
-    # 2. Hash della password
     hashed_pwd = auth.get_password_hash(user.password)
-    
-    # 3. Crea l'utente includendo lo username
-    new_user = models.User(
-        email=user.email, 
-        username=user.username, # <--- Passiamo lo username
-        hashed_password=hashed_pwd
-    )
+    new_user = models.User(email=user.email, username=user.username, hashed_password=hashed_pwd)
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
@@ -67,14 +60,13 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login", response_model=schemas.Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # Swagger invia l'email nel campo 'username' del form
     user = db.query(models.User).filter(models.User.email == form_data.username).first()
     
-    if not user or not auth.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Credenziali non valide"
-        )
+    if not user:
+        raise HTTPException(status_code=403, detail="Account non trovato. Verifica l'email inserita.")
+    
+    if not auth.verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=403, detail="Password errata. Riprova.")
     
     access_token = auth.create_access_token(data={"user_id": user.id})
     return {"access_token": access_token, "token_type": "bearer"}
@@ -101,19 +93,14 @@ def get_conti(
     return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
 
 @app.put("/conti/{conto_id}", response_model=schemas.ContoOut)
-def update_conto(
-    conto_id: int, 
-    conto_data: schemas.ContoCreate, 
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    db_conto = db.query(models.Conto).filter(
-        models.Conto.id == conto_id, 
-        models.Conto.user_id == current_user_id
-    ).first()
+def update_conto(conto_id: int, conto_data: schemas.ContoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+    db_conto = db.query(models.Conto).filter(models.Conto.id == conto_id).first()
 
     if not db_conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato")
+        raise HTTPException(status_code=404, detail=f"Impossibile aggiornare: il conto con ID {conto_id} non esiste.")
+    
+    if db_conto.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Accesso negato: non hai i permessi per modificare questo conto.")
 
     for key, value in conto_data.dict().items():
         setattr(db_conto, key, value)
@@ -170,13 +157,13 @@ def update_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(
-        models.Categoria.id == categoria_id, 
-        models.Categoria.user_id == current_user_id
-    ).first()
+    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail="Categoria non trovata")
+        raise HTTPException(status_code=404, detail=f"Categoria con ID {categoria_id} non trovata nel sistema.")
+    
+    if db_cat.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Non sei autorizzato a modificare questa categoria.")
 
     for key, value in cat_data.dict().items():
         setattr(db_cat, key, value)
@@ -191,13 +178,13 @@ def delete_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(
-        models.Categoria.id == categoria_id, 
-        models.Categoria.user_id == current_user_id
-    ).first()
+    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail="Categoria non trovata")
+        raise HTTPException(status_code=404, detail="Impossibile eliminare: la categoria non esiste.")
+    
+    if db_cat.user_id != current_user_id:
+        raise HTTPException(status_code=403, detail="Azione negata: non puoi eliminare categorie di altri utenti.")
 
     db.delete(db_cat)
     db.commit()
@@ -211,16 +198,27 @@ def create_transazione(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Controllo di sicurezza: il conto appartiene all'utente?
+    # Verifichiamo che il conto scelto esista e appartenga all'utente loggato
     conto = db.query(models.Conto).filter(
         models.Conto.id == transazione.conto_id, 
         models.Conto.user_id == current_user_id
     ).first()
     
     if not conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato o non autorizzato")
+        raise HTTPException(
+            status_code=404, 
+            detail=f"Il conto selezionato (ID: {transazione.conto_id}) non esiste o non ti appartiene."
+        )
 
-    # Se tutto ok, salviamo
+    # (Opzionale) Se è presente una categoria, verifichiamo che appartenga all'utente
+    if transazione.categoria_id:
+        cat = db.query(models.Categoria).filter(
+            models.Categoria.id == transazione.categoria_id,
+            models.Categoria.user_id == current_user_id
+        ).first()
+        if not cat:
+            raise HTTPException(status_code=404, detail="La categoria selezionata non è valida per il tuo profilo.")
+
     new_transazione = models.Transazione(**transazione.dict())
     db.add(new_transazione)
     db.commit()
@@ -244,14 +242,17 @@ def update_transazione(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Verifichiamo che la transazione esista e appartenga all'utente (tramite il conto)
+    # Usiamo un JOIN per verificare la proprietà in una sola query
     db_transazione = db.query(models.Transazione).join(models.Conto).filter(
         models.Transazione.id == transazione_id, 
         models.Conto.user_id == current_user_id
     ).first()
 
     if not db_transazione:
-        raise HTTPException(status_code=404, detail="Transazione non trovata")
+        raise HTTPException(
+            status_code=404, 
+            detail="Transazione non trovata o non hai i permessi per modificarla."
+        )
 
     for key, value in transazione_data.dict().items():
         setattr(db_transazione, key, value)
@@ -281,12 +282,16 @@ def delete_transazione(
 # --- ENDPOINT INVESTIMENTI ---
 
 @app.post("/investimenti", response_model=schemas.InvestimentoOut)
-def create_investimento(
-    investimento: schemas.InvestimentoCreate, 
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    # Creiamo il titolo nell'anagrafica dell'utente
+def create_investimento(investimento: schemas.InvestimentoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+    # Evitiamo duplicati dello stesso ISIN per lo stesso utente
+    existing = db.query(models.Investimento).filter(
+        models.Investimento.isin == investimento.isin, 
+        models.Investimento.user_id == current_user_id
+    ).first()
+    
+    if existing:
+        raise HTTPException(status_code=400, detail=f"Il titolo con ISIN {investimento.isin} è già presente nel tuo portafoglio.")
+
     new_invest = models.Investimento(**investimento.dict(), user_id=current_user_id)
     db.add(new_invest)
     db.commit()
