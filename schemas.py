@@ -1,3 +1,4 @@
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, date
@@ -26,13 +27,26 @@ class ContoOut(ContoCreate):
         from_attributes = True
 
 # Per le Categorie
+class SottocategoriaBase(BaseModel):
+    nome: str
+
+class SottocategoriaCreate(SottocategoriaBase):
+    pass
+
+class SottocategoriaOut(SottocategoriaBase):
+    id: int
+    class Config:
+        from_attributes = True
+
 class CategoriaCreate(BaseModel):
     nome: str
-    parent_id: Optional[int] = None
+    sottocategorie: Optional[List[SottocategoriaCreate]] = None
 
-class CategoriaOut(CategoriaCreate):
+class CategoriaOut(BaseModel):
     id: int
-    user_id: int
+    nome: str
+    sottocategorie: List[SottocategoriaOut] = [] # Include le sottocategorie nella risposta
+
     class Config:
         from_attributes = True
 

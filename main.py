@@ -115,7 +115,7 @@ def get_conti(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
+    return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).order_by(models.Conto.id).all()
 
 @app.put("/conti/{conto_id}", response_model=schemas.ContoOut)
 def update_conto(conto_id: int, conto_data: schemas.ContoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
@@ -162,10 +162,26 @@ def create_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    new_cat = models.Categoria(**categoria.dict(), user_id=current_user_id)
+    # 1. Estraiamo i dati escludendo le sottocategorie per creare la categoria madre
+    categoria_data = categoria.dict(exclude={'sottocategorie'})
+    new_cat = models.Categoria(**categoria_data, user_id=current_user_id)
+    
+    # 2. Se sono presenti sottocategorie, le trasformiamo in modelli SQLAlchemy
+    if categoria.sottocategorie:
+        for sub_data in categoria.sottocategorie:
+            # Creiamo l'oggetto sottocategoria collegandolo alla categoria madre
+            new_sub = models.Sottocategoria(nome=sub_data.nome)
+            new_cat.sottocategorie.append(new_sub)
+
     db.add(new_cat)
-    db.commit()
-    db.refresh(new_cat)
+    
+    try:
+        db.commit()
+        db.refresh(new_cat)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Errore durante la creazione della categoria e sottocategorie")
+        
     return new_cat
 
 @app.get("/categorie", response_model=list[schemas.CategoriaOut])
@@ -173,7 +189,10 @@ def get_categorie(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    return db.query(models.Categoria).filter(models.Categoria.user_id == current_user_id).all()
+    # Recupera le categorie e le loro sottocategorie associate
+    return db.query(models.Categoria).filter(
+        models.Categoria.user_id == current_user_id
+    ).order_by(models.Categoria.nome).all()
 
 @app.put("/categorie/{categoria_id}", response_model=schemas.CategoriaOut)
 def update_categoria(
@@ -182,16 +201,25 @@ def update_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail=f"Categoria con ID {categoria_id} non trovata nel sistema.")
-    
-    if db_cat.user_id != current_user_id:
-        raise HTTPException(status_code=403, detail="Non sei autorizzato a modificare questa categoria.")
+        raise HTTPException(status_code=404, detail="Categoria non trovata o non autorizzato.")
 
-    for key, value in cat_data.dict().items():
-        setattr(db_cat, key, value)
+    # 1. Aggiorna il nome della categoria principale
+    db_cat.nome = cat_data.nome
+
+    # 2. Sincronizza Sottocategorie: Rimuovi le vecchie e aggiungi le nuove
+    # Grazie a cascade="all, delete-orphan", svuotando la lista i record vengono cancellati dal DB
+    db_cat.sottocategorie.clear() 
+    
+    if cat_data.sottocategorie:
+        for sub in cat_data.sottocategorie:
+            new_sub = models.Sottocategoria(nome=sub.nome)
+            db_cat.sottocategorie.append(new_sub)
 
     db.commit()
     db.refresh(db_cat)
@@ -203,13 +231,13 @@ def delete_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail="Impossibile eliminare: la categoria non esiste.")
-    
-    if db_cat.user_id != current_user_id:
-        raise HTTPException(status_code=403, detail="Azione negata: non puoi eliminare categorie di altri utenti.")
+        raise HTTPException(status_code=404, detail="Categoria non esistente.")
 
     db.delete(db_cat)
     db.commit()
