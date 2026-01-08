@@ -18,7 +18,6 @@ class UserOut(BaseModel):
 # Per i Conti
 class ContoCreate(BaseModel):
     nome: str
-    tipo: str
 
 class ContoOut(ContoCreate):
     id: int
