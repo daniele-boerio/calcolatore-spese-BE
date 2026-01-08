@@ -41,22 +41,38 @@ def read_root():
 
 # --- ENDPOINT UTENTI ---
 
-@app.post("/register", response_model=schemas.UserOut)
+# main.py
+
+@app.post("/register", response_model=schemas.Token) # Cambiato lo schema di risposta
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # Controllo specifico per Email
+    # 1. Controllo duplicati (Email e Username)
     if db.query(models.User).filter(models.User.email == user.email).first():
         raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
     
-    # Controllo specifico per Username
     if db.query(models.User).filter(models.User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Lo username scelto non è disponibile.")
     
+    # 2. Hash della password e creazione utente
     hashed_pwd = auth.get_password_hash(user.password)
-    new_user = models.User(email=user.email, username=user.username, hashed_password=hashed_pwd)
+    new_user = models.User(
+        email=user.email, 
+        username=user.username, 
+        hashed_password=hashed_pwd
+    )
+    
     db.add(new_user)
     db.commit()
-    db.refresh(new_user)
-    return new_user
+    db.refresh(new_user) # Ora abbiamo l'ID generato dal DB
+    
+    # 3. GENERAZIONE TOKEN (come nella login)
+    access_token = auth.create_access_token(data={"user_id": new_user.id})
+    
+    # Restituiamo lo stesso formato della login
+    return {
+        "access_token": access_token, 
+        "token_type": "bearer",
+        "username": new_user.username
+    }
 
 @app.post("/login", response_model=schemas.Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
