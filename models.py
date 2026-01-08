@@ -63,6 +63,7 @@ class Transazione(Base):
     
     conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
+    sottocategoria_id = Column(Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True)
     
     conto = relationship("Conto", back_populates="transazioni")
 

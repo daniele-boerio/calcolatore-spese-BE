@@ -20,6 +20,9 @@ class UserOut(BaseModel):
 class ContoCreate(BaseModel):
     nome: str
 
+class ContoUpdate(BaseModel):
+    nome: str
+
 class ContoOut(ContoCreate):
     id: int
     user_id: int
@@ -30,8 +33,11 @@ class ContoOut(ContoCreate):
 class SottocategoriaBase(BaseModel):
     nome: str
 
-class SottocategoriaCreate(SottocategoriaBase):
-    pass
+class SottocategoriaCreate(BaseModel):
+    nome: str
+
+class SottocategoriaUpdate(SottocategoriaBase):
+    nome: str
 
 class SottocategoriaOut(SottocategoriaBase):
     id: int
