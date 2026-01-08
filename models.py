@@ -32,19 +32,26 @@ class Categoria(Base):
     nome = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"))
     
-    # Se questo è NULL, è una categoria principale. 
-    # Se contiene un ID, è una sottocategoria.
-    parent_id = Column(Integer, ForeignKey("categorie.id"), nullable=True)
-    
     # Relazioni
     owner = relationship("User", back_populates="categorie")
     
-    # Questa riga crea la gerarchia
-    subcategorie = relationship(
-        "Categoria", 
-        backref=backref('parent', remote_side=[id]),
-        cascade="all, delete-orphan" # Se cancelli il padre, cancella le sottocategorie
+    # Questa relazione punta alla tabella Sottocategoria
+    # Usiamo 'sottocategorie' al plurale perché un padre ha molti figli
+    sottocategorie = relationship(
+        "Sottocategoria", 
+        back_populates="categoria_padre", 
+        cascade="all, delete-orphan"
     )
+
+class Sottocategoria(Base):
+    __tablename__ = "sottocategorie"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False)
+    categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="CASCADE"))
+    
+    # Relazione inversa: punta alla categoria singola
+    categoria_padre = relationship("Categoria", back_populates="sottocategorie")
 
 class Transazione(Base):
     __tablename__ = "transazioni"
@@ -56,6 +63,7 @@ class Transazione(Base):
     
     conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
+    sottocategoria_id = Column(Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True)
     
     conto = relationship("Conto", back_populates="transazioni")
 

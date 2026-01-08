@@ -41,51 +41,68 @@ def read_root():
 
 # --- ENDPOINT UTENTI ---
 
-@app.post("/register", response_model=schemas.UserOut)
+@app.post("/register", response_model=schemas.Token)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # Controllo specifico per Email
+    # 1. Controllo duplicati
     if db.query(models.User).filter(models.User.email == user.email).first():
         raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
     
-    # Controllo specifico per Username
     if db.query(models.User).filter(models.User.username == user.username).first():
         raise HTTPException(status_code=400, detail="Lo username scelto non è disponibile.")
     
+    # 2. Hash della password e creazione utente
     hashed_pwd = auth.get_password_hash(user.password)
-    new_user = models.User(email=user.email, username=user.username, hashed_password=hashed_pwd)
+    new_user = models.User(
+        email=user.email, 
+        username=user.username, 
+        hashed_password=hashed_pwd
+    )
+    
     db.add(new_user)
     db.commit()
     db.refresh(new_user)
-    return new_user
+    
+    # 3. Generazione Token per login automatico
+    access_token = auth.create_access_token(data={"user_id": new_user.id})
+    
+    return {
+        "access_token": access_token,
+        "username": new_user.username
+    }
 
 @app.post("/login", response_model=schemas.Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    # Cerchiamo l'utente direttamente tramite lo username
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
     
     if not user:
-        raise HTTPException(status_code=403, detail="Account non trovato. Verifica l'email inserita.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Account non trovato. Verifica lo username inserito."
+        )
     
     if not auth.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=403, detail="Password errata. Riprova.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Password errata. Riprova."
+        )
     
     access_token = auth.create_access_token(data={"user_id": user.id})
     
-    # Restituiamo il token insieme all'username recuperato dal DB
     return {
-        "access_token": access_token, 
-        "token_type": "bearer",
-        "username": user.username # <--- Campo aggiunto
+        "access_token": access_token,
+        "username": user.username
     }
 
 # --- ENDPOINT CONTI ---
 
-@app.post("/conti", response_model=schemas.ContoOut)
+@app.post("/conto", response_model=schemas.ContoOut)
 def create_conto(
     conto: schemas.ContoCreate, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    new_conto = models.Conto(**conto.dict(), user_id=current_user_id)
+    new_conto = models.Conto(**conto.model_dump(), user_id=current_user_id)
     db.add(new_conto)
     db.commit()
     db.refresh(new_conto)
@@ -96,10 +113,10 @@ def get_conti(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
+    return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).order_by(models.Conto.id).all()
 
-@app.put("/conti/{conto_id}", response_model=schemas.ContoOut)
-def update_conto(conto_id: int, conto_data: schemas.ContoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+@app.put("/conto/{conto_id}", response_model=schemas.ContoOut)
+def update_conto(conto_id: int, conto_data: schemas.ContoUpdate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     db_conto = db.query(models.Conto).filter(models.Conto.id == conto_id).first()
 
     if not db_conto:
@@ -108,14 +125,14 @@ def update_conto(conto_id: int, conto_data: schemas.ContoCreate, db: Session = D
     if db_conto.user_id != current_user_id:
         raise HTTPException(status_code=403, detail="Accesso negato: non hai i permessi per modificare questo conto.")
 
-    for key, value in conto_data.dict().items():
+    for key, value in conto_data.model_dump().items():
         setattr(db_conto, key, value)
 
     db.commit()
     db.refresh(db_conto)
     return db_conto
 
-@app.delete("/conti/{conto_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/conto/{conto_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_conto(
     conto_id: int, 
     db: Session = Depends(get_db), 
@@ -137,16 +154,32 @@ def delete_conto(
 
 # --- ENDPOINT CATEGORIE ---
 
-@app.post("/categorie", response_model=schemas.CategoriaOut)
+@app.post("/categoria", response_model=schemas.CategoriaOut)
 def create_categoria(
     categoria: schemas.CategoriaCreate, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    new_cat = models.Categoria(**categoria.dict(), user_id=current_user_id)
+    # 1. Estraiamo i dati escludendo le sottocategorie per creare la categoria madre
+    categoria_data = categoria.model_dump(exclude={'sottocategorie'})
+    new_cat = models.Categoria(**categoria_data, user_id=current_user_id)
+    
+    # 2. Se sono presenti sottocategorie, le trasformiamo in modelli SQLAlchemy
+    if categoria.sottocategorie:
+        for sub_data in categoria.sottocategorie:
+            # Creiamo l'oggetto sottocategoria collegandolo alla categoria madre
+            new_sub = models.Sottocategoria(nome=sub_data.nome)
+            new_cat.sottocategorie.append(new_sub)
+
     db.add(new_cat)
-    db.commit()
-    db.refresh(new_cat)
+    
+    try:
+        db.commit()
+        db.refresh(new_cat)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Errore durante la creazione della categoria e sottocategorie")
+        
     return new_cat
 
 @app.get("/categorie", response_model=list[schemas.CategoriaOut])
@@ -154,51 +187,140 @@ def get_categorie(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    return db.query(models.Categoria).filter(models.Categoria.user_id == current_user_id).all()
+    # Recupera le categorie e le loro sottocategorie associate
+    return db.query(models.Categoria).filter(
+        models.Categoria.user_id == current_user_id
+    ).order_by(models.Categoria.nome).all()
 
-@app.put("/categorie/{categoria_id}", response_model=schemas.CategoriaOut)
+@app.put("/categoria/{categoria_id}", response_model=schemas.CategoriaOut)
 def update_categoria(
     categoria_id: int, 
     cat_data: schemas.CategoriaCreate, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
+    # Cerchiamo la categoria verificando che appartenga all'utente
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail=f"Categoria con ID {categoria_id} non trovata nel sistema.")
-    
-    if db_cat.user_id != current_user_id:
-        raise HTTPException(status_code=403, detail="Non sei autorizzato a modificare questa categoria.")
+        raise HTTPException(
+            status_code=404, 
+            detail="Categoria non trovata o non disponi dei permessi necessari."
+        )
 
-    for key, value in cat_data.dict().items():
-        setattr(db_cat, key, value)
+    # Aggiorniamo solo il nome della categoria principale
+    db_cat.nome = cat_data.nome
 
     db.commit()
     db.refresh(db_cat)
     return db_cat
 
-@app.delete("/categorie/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/categoria/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_categoria(
     categoria_id: int, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_cat = db.query(models.Categoria).filter(models.Categoria.id == categoria_id).first()
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
 
     if not db_cat:
-        raise HTTPException(status_code=404, detail="Impossibile eliminare: la categoria non esiste.")
-    
-    if db_cat.user_id != current_user_id:
-        raise HTTPException(status_code=403, detail="Azione negata: non puoi eliminare categorie di altri utenti.")
+        raise HTTPException(status_code=404, detail="Categoria non esistente.")
 
     db.delete(db_cat)
     db.commit()
     return None
 
+# --- ENDPOINT SOTTOCATEGORIE (OPERAZIONI SINGOLE) ---
+
+@app.post("/categorie/{categoria_id}/sottocategorie", response_model=list[schemas.SottocategoriaOut])
+def add_sottocategorie(
+    categoria_id: int,
+    sub_data_list: list[schemas.SottocategoriaCreate], # Accetta una lista
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # 1. Verifica proprietà della categoria padre
+    db_cat = db.query(models.Categoria).filter(
+        models.Categoria.id == categoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
+
+    if not db_cat:
+        raise HTTPException(status_code=404, detail="Categoria padre non trovata o non autorizzata")
+
+    # 2. Crea e aggiungi ogni sottocategoria della lista
+    new_subcategories = []
+    for sub_data in sub_data_list:
+        new_sub = models.Sottocategoria(
+            nome=sub_data.nome, 
+            categoria_id=categoria_id
+        )
+        db.add(new_sub)
+        new_subcategories.append(new_sub)
+
+    # 3. Commit unico per tutte le nuove sottocategorie
+    db.commit()
+    
+    # Rinfresca gli oggetti per ottenere gli ID generati
+    for sub in new_subcategories:
+        db.refresh(sub)
+        
+    return new_subcategories
+
+@app.put("/sottocategoria/{sottocategoria_id}", response_model=schemas.SottocategoriaOut)
+def update_sottocategoria(
+    sottocategoria_id: int,
+    sub_data: schemas.SottocategoriaUpdate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # JOIN per verificare che il proprietario della categoria sia l'utente corrente
+    db_sub = db.query(models.Sottocategoria).join(models.Categoria).filter(
+        models.Sottocategoria.id == sottocategoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
+
+    if not db_sub:
+        raise HTTPException(status_code=404, detail="Sottocategoria non trovata o non autorizzato")
+
+    db_sub.nome = sub_data.nome
+    db.commit()
+    db.refresh(db_sub)
+    return db_sub
+
+@app.delete("/sottocategoria/{sottocategoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_sottocategoria(
+    sottocategoria_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Verifichiamo proprietà tramite join
+    db_sub = db.query(models.Sottocategoria).join(models.Categoria).filter(
+        models.Sottocategoria.id == sottocategoria_id,
+        models.Categoria.user_id == current_user_id
+    ).first()
+
+    if not db_sub:
+        raise HTTPException(status_code=404, detail="Sottocategoria non trovata")
+
+    # Gestione integrità transazioni: setta a NULL le transazioni collegate
+    db.query(models.Transazione).filter(
+        models.Transazione.sottocategoria_id == sottocategoria_id
+    ).update({models.Transazione.sottocategoria_id: None})
+
+    db.delete(db_sub)
+    db.commit()
+    return None
+
 # --- ENDPOINT TRANSAZIONI ---
 
-@app.post("/transazioni", response_model=schemas.TransazioneOut)
+@app.post("/transazione", response_model=schemas.TransazioneOut)
 def create_transazione(
     transazione: schemas.TransazioneCreate, 
     db: Session = Depends(get_db), 
@@ -225,7 +347,7 @@ def create_transazione(
         if not cat:
             raise HTTPException(status_code=404, detail="La categoria selezionata non è valida per il tuo profilo.")
 
-    new_transazione = models.Transazione(**transazione.dict())
+    new_transazione = models.Transazione(**transazione.model_dump())
     db.add(new_transazione)
     db.commit()
     db.refresh(new_transazione)
@@ -241,7 +363,7 @@ def get_transazioni(
         models.Conto.user_id == current_user_id
     ).all()
 
-@app.put("/transazioni/{transazione_id}", response_model=schemas.TransazioneOut)
+@app.put("/transazione/{transazione_id}", response_model=schemas.TransazioneOut)
 def update_transazione(
     transazione_id: int, 
     transazione_data: schemas.TransazioneCreate, 
@@ -260,14 +382,14 @@ def update_transazione(
             detail="Transazione non trovata o non hai i permessi per modificarla."
         )
 
-    for key, value in transazione_data.dict().items():
+    for key, value in transazione_data.model_dump().items():
         setattr(db_transazione, key, value)
 
     db.commit()
     db.refresh(db_transazione)
     return db_transazione
 
-@app.delete("/transazioni/{transazione_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/transazione/{transazione_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_transazione(
     transazione_id: int, 
     db: Session = Depends(get_db), 
@@ -287,7 +409,7 @@ def delete_transazione(
 
 # --- ENDPOINT INVESTIMENTI ---
 
-@app.post("/investimenti", response_model=schemas.InvestimentoOut)
+@app.post("/investimento", response_model=schemas.InvestimentoOut)
 def create_investimento(investimento: schemas.InvestimentoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     # Evitiamo duplicati dello stesso ISIN per lo stesso utente
     existing = db.query(models.Investimento).filter(
@@ -298,7 +420,7 @@ def create_investimento(investimento: schemas.InvestimentoCreate, db: Session = 
     if existing:
         raise HTTPException(status_code=400, detail=f"Il titolo con ISIN {investimento.isin} è già presente nel tuo portafoglio.")
 
-    new_invest = models.Investimento(**investimento.dict(), user_id=current_user_id)
+    new_invest = models.Investimento(**investimento.model_dump(), user_id=current_user_id)
     db.add(new_invest)
     db.commit()
     db.refresh(new_invest)
@@ -309,7 +431,7 @@ def get_investimenti(db: Session = Depends(get_db), current_user_id: int = Depen
     # Recupera tutti i titoli posseduti dall'utente
     return db.query(models.Investimento).filter(models.Investimento.user_id == current_user_id).all()
 
-@app.post("/investimenti/operazione", response_model=schemas.StoricoInvestimentoOut)
+@app.post("/investimento/operazione", response_model=schemas.StoricoInvestimentoOut)
 def add_operazione_investimento(
     operazione: schemas.StoricoInvestimentoCreate, 
     db: Session = Depends(get_db), 
@@ -324,13 +446,13 @@ def add_operazione_investimento(
     if not investimento:
         raise HTTPException(status_code=404, detail="Investimento non trovato o non autorizzato")
 
-    new_record = models.StoricoInvestimento(**operazione.dict())
+    new_record = models.StoricoInvestimento(**operazione.model_dump())
     db.add(new_record)
     db.commit()
     db.refresh(new_record)
     return new_record
 
-@app.put("/investimenti/operazione/{operazione_id}", response_model=schemas.StoricoInvestimentoOut)
+@app.put("/investimento/operazione/{operazione_id}", response_model=schemas.StoricoInvestimentoOut)
 def update_operazione_investimento(
     operazione_id: int,
     operazione_data: schemas.StoricoInvestimentoCreate,
@@ -347,14 +469,14 @@ def update_operazione_investimento(
         raise HTTPException(status_code=404, detail="Operazione non trovata o non autorizzata")
 
     # Aggiorniamo i dati
-    for key, value in operazione_data.dict().items():
+    for key, value in operazione_data.model_dump().items():
         setattr(db_operazione, key, value)
 
     db.commit()
     db.refresh(db_operazione)
     return db_operazione
 
-@app.delete("/investimenti/operazione/{operazione_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/investimento/operazione/{operazione_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operazione_investimento(
     operazione_id: int,
     db: Session = Depends(get_db),
@@ -372,7 +494,7 @@ def delete_operazione_investimento(
     db.commit()
     return None
 
-@app.put("/investimenti/{investimento_id}", response_model=schemas.InvestimentoOut)
+@app.put("/investimento/{investimento_id}", response_model=schemas.InvestimentoOut)
 def update_investimento(
     investimento_id: int,
     investimento_data: schemas.InvestimentoCreate,
@@ -387,14 +509,14 @@ def update_investimento(
     if not db_investimento:
         raise HTTPException(status_code=404, detail="Investimento non trovato")
 
-    for key, value in investimento_data.dict().items():
+    for key, value in investimento_data.model_dump().items():
         setattr(db_investimento, key, value)
 
     db.commit()
     db.refresh(db_investimento)
     return db_investimento
 
-@app.delete("/investimenti/{investimento_id}", status_code=status.HTTP_204_NO_CONTENT)
+@app.delete("/investimento/{investimento_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_investimento(
     investimento_id: int,
     db: Session = Depends(get_db),

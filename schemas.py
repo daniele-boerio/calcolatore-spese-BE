@@ -1,3 +1,4 @@
+from typing import List, Optional
 from pydantic import BaseModel, EmailStr
 from typing import Optional
 from datetime import datetime, date
@@ -18,7 +19,9 @@ class UserOut(BaseModel):
 # Per i Conti
 class ContoCreate(BaseModel):
     nome: str
-    tipo: str
+
+class ContoUpdate(BaseModel):
+    nome: str
 
 class ContoOut(ContoCreate):
     id: int
@@ -27,13 +30,29 @@ class ContoOut(ContoCreate):
         from_attributes = True
 
 # Per le Categorie
+class SottocategoriaBase(BaseModel):
+    nome: str
+
+class SottocategoriaCreate(BaseModel):
+    nome: str
+
+class SottocategoriaUpdate(SottocategoriaBase):
+    nome: str
+
+class SottocategoriaOut(SottocategoriaBase):
+    id: int
+    class Config:
+        from_attributes = True
+
 class CategoriaCreate(BaseModel):
     nome: str
-    parent_id: Optional[int] = None
+    sottocategorie: Optional[List[SottocategoriaCreate]] = None
 
-class CategoriaOut(CategoriaCreate):
+class CategoriaOut(BaseModel):
     id: int
-    user_id: int
+    nome: str
+    sottocategorie: List[SottocategoriaOut] = [] # Include le sottocategorie nella risposta
+
     class Config:
         from_attributes = True
 
@@ -52,7 +71,6 @@ class TransazioneOut(TransazioneCreate):
 
 class Token(BaseModel):
     access_token: str
-    token_type: str
     username: str
 
 class LoginRequest(BaseModel):
