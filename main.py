@@ -41,11 +41,9 @@ def read_root():
 
 # --- ENDPOINT UTENTI ---
 
-# main.py
-
-@app.post("/register", response_model=schemas.Token) # Cambiato lo schema di risposta
+@app.post("/register", response_model=schemas.Token)
 def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
-    # 1. Controllo duplicati (Email e Username)
+    # 1. Controllo duplicati
     if db.query(models.User).filter(models.User.email == user.email).first():
         raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
     
@@ -62,12 +60,11 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
     
     db.add(new_user)
     db.commit()
-    db.refresh(new_user) # Ora abbiamo l'ID generato dal DB
+    db.refresh(new_user)
     
-    # 3. GENERAZIONE TOKEN (come nella login)
+    # 3. Generazione Token per login automatico
     access_token = auth.create_access_token(data={"user_id": new_user.id})
     
-    # Restituiamo lo stesso formato della login
     return {
         "access_token": access_token, 
         "token_type": "bearer",
@@ -76,21 +73,27 @@ def register_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
 
 @app.post("/login", response_model=schemas.Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.email == form_data.username).first()
+    # Cerchiamo l'utente direttamente tramite lo username
+    user = db.query(models.User).filter(models.User.username == form_data.username).first()
     
     if not user:
-        raise HTTPException(status_code=403, detail="Account non trovato. Verifica l'email inserita.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Account non trovato. Verifica lo username inserito."
+        )
     
     if not auth.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(status_code=403, detail="Password errata. Riprova.")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, 
+            detail="Password errata. Riprova."
+        )
     
     access_token = auth.create_access_token(data={"user_id": user.id})
     
-    # Restituiamo il token insieme all'username recuperato dal DB
     return {
         "access_token": access_token, 
         "token_type": "bearer",
-        "username": user.username # <--- Campo aggiunto
+        "username": user.username
     }
 
 # --- ENDPOINT CONTI ---
