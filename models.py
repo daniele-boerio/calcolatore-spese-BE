@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean, Date
+from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean, Date, Table
 from sqlalchemy.orm import relationship
 from datetime import datetime
 from database import Base
@@ -10,16 +10,18 @@ class User(Base):
     username = Column(String, unique=False, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    
-    # Relazioni
+    total_budget = Column(Float, nullable=True) # Per la BudgetCard
+
     conti = relationship("Conto", back_populates="owner", cascade="all, delete-orphan")
     categorie = relationship("Categoria", back_populates="owner", cascade="all, delete-orphan")
+    tags = relationship("Tag", back_populates="owner", cascade="all, delete-orphan")
     investimenti = relationship("Investimento", cascade="all, delete-orphan")
 
 class Conto(Base):
     __tablename__ = "conti"
     id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, nullable=False) # es. Contanti, Intesa, Revolut
+    nome = Column(String, nullable=False)
+    saldo = Column(Float, nullable=False, default=0.0) # Saldo dinamico
     user_id = Column(Integer, ForeignKey("users.id"))
     
     owner = relationship("User", back_populates="conti")
@@ -53,6 +55,15 @@ class Sottocategoria(Base):
     # Relazione inversa: punta alla categoria singola
     categoria_padre = relationship("Categoria", back_populates="sottocategorie")
 
+class Tag(Base):
+    __tablename__ = "tags"
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    
+    owner = relationship("User", back_populates="tags")
+    transazioni = relationship("Transazione", back_populates="tag")
+
 class Transazione(Base):
     __tablename__ = "transazioni"
     id = Column(Integer, primary_key=True, index=True)
@@ -64,8 +75,10 @@ class Transazione(Base):
     conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
     sottocategoria_id = Column(Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True)
+    tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
     
     conto = relationship("Conto", back_populates="transazioni")
+    tag = relationship("Tag", back_populates="transazioni")
 
 class Investimento(Base):
     __tablename__ = "investimenti"
