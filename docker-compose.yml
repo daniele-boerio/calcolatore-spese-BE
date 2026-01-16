@@ -1,7 +1,7 @@
 services:
   db:
     image: postgres:15
-    container_name: db  # <--- Nome personalizzato
+    container_name: db
     restart: always
     environment:
       POSTGRES_USER: ${DB_USER}
@@ -12,10 +12,12 @@ services:
 
   backend:
     build: .
-    container_name: spese-backend-api  # <--- Nome personalizzato
+    container_name: spese-backend-api
     restart: always
     ports:
       - "8000:8000"
     env_file: .env
     depends_on:
       - db
+    command: >
+      sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000"
