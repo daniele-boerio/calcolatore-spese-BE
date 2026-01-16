@@ -10,7 +10,7 @@ router = APIRouter(
 
 # --- ENDPOINT CATEGORIE ---
 
-@router.post("/categoria", response_model=schemas.CategoriaOut)
+@router.post("", response_model=schemas.CategoriaOut)
 def create_categoria(
     categoria: schemas.CategoriaCreate, 
     db: Session = Depends(get_db), 
@@ -31,7 +31,7 @@ def create_categoria(
     db.refresh(new_cat)
     return new_cat
 
-@router.get("/categorie", response_model=list[schemas.CategoriaOut])
+@router.get("", response_model=list[schemas.CategoriaOut])
 def get_categorie(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
@@ -41,7 +41,7 @@ def get_categorie(
         models.Categoria.user_id == current_user_id
     ).order_by(models.Categoria.nome).all()
 
-@router.put("/categoria/{categoria_id}", response_model=schemas.CategoriaOut)
+@router.put("/{categoria_id}", response_model=schemas.CategoriaOut)
 def update_categoria(
     categoria_id: int, 
     cat_data: schemas.CategoriaCreate, 
@@ -67,7 +67,7 @@ def update_categoria(
     db.refresh(db_cat)
     return db_cat
 
-@router.delete("/categoria/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{categoria_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_categoria(
     categoria_id: int, 
     db: Session = Depends(get_db), 

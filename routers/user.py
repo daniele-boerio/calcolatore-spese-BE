@@ -86,3 +86,38 @@ def get_current_month_expenses(db: Session = Depends(get_db), current_user_id: i
             "percentage": percentage
         }
     }
+
+@router.get("/expensesByCategory")
+def get_expenses_by_category(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Calcoliamo il primo giorno del mese corrente
+    today = datetime.now()
+    first_day_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Query: Uniamo Categorie -> Transazioni -> Conti
+    # Raggruppiamo per il nome della categoria e sommiamo l'importo
+    results = db.query(
+        models.Categoria.nome.label("category"),
+        func.sum(models.Transazione.importo).label("total")
+    ).join(
+        models.Transazione, models.Transazione.categoria_id == models.Categoria.id
+    ).join(
+        models.Conto, models.Transazione.conto_id == models.Conto.id
+    ).filter(
+        models.Conto.user_id == current_user_id,
+        models.Transazione.tipo == "USCITA",
+        models.Transazione.data >= first_day_of_month
+    ).group_by(
+        models.Categoria.nome
+    ).all()
+
+    # Formattiamo i dati in un array di oggetti pronto per il PieChart del Frontend
+    # Esempio: [{ "label": "Cibo", "value": 150.0 }, ...]
+    formatted_data = [
+        {"label": row.category, "value": float(row.total)} 
+        for row in results
+    ]
+
+    return formatted_data

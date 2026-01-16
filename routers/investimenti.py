@@ -10,7 +10,7 @@ router = APIRouter(
 
 # --- ENDPOINT INVESTIMENTI ---
 
-@router.post("/investimento", response_model=schemas.InvestimentoOut)
+@router.post("", response_model=schemas.InvestimentoOut)
 def create_investimento(investimento: schemas.InvestimentoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     # Evitiamo duplicati dello stesso ISIN per lo stesso utente
     existing = db.query(models.Investimento).filter(
@@ -27,12 +27,12 @@ def create_investimento(investimento: schemas.InvestimentoCreate, db: Session = 
     db.refresh(new_invest)
     return new_invest
 
-@router.get("/investimenti", response_model=list[schemas.InvestimentoOut])
+@router.get("", response_model=list[schemas.InvestimentoOut])
 def get_investimenti(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     # Recupera tutti i titoli posseduti dall'utente
     return db.query(models.Investimento).filter(models.Investimento.user_id == current_user_id).all()
 
-@router.post("/investimento/operazione", response_model=schemas.StoricoInvestimentoOut)
+@router.post("/operazione", response_model=schemas.StoricoInvestimentoOut)
 def add_operazione_investimento(
     operazione: schemas.StoricoInvestimentoCreate, 
     db: Session = Depends(get_db), 
@@ -53,7 +53,7 @@ def add_operazione_investimento(
     db.refresh(new_record)
     return new_record
 
-@router.put("/investimento/operazione/{operazione_id}", response_model=schemas.StoricoInvestimentoOut)
+@router.put("/operazione/{operazione_id}", response_model=schemas.StoricoInvestimentoOut)
 def update_operazione_investimento(
     operazione_id: int,
     operazione_data: schemas.StoricoInvestimentoCreate,
@@ -77,7 +77,7 @@ def update_operazione_investimento(
     db.refresh(db_operazione)
     return db_operazione
 
-@router.delete("/investimento/operazione/{operazione_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/operazione/{operazione_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_operazione_investimento(
     operazione_id: int,
     db: Session = Depends(get_db),
@@ -95,7 +95,7 @@ def delete_operazione_investimento(
     db.commit()
     return None
 
-@router.put("/investimento/{investimento_id}", response_model=schemas.InvestimentoOut)
+@router.put("/{investimento_id}", response_model=schemas.InvestimentoOut)
 def update_investimento(
     investimento_id: int,
     investimento_data: schemas.InvestimentoCreate,
@@ -117,7 +117,7 @@ def update_investimento(
     db.refresh(db_investimento)
     return db_investimento
 
-@router.delete("/investimento/{investimento_id}", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/{investimento_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_investimento(
     investimento_id: int,
     db: Session = Depends(get_db),

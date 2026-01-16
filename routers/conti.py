@@ -10,7 +10,7 @@ router = APIRouter(
 
 # --- ENDPOINT CONTI ---
 
-@router.post("/", response_model=schemas.ContoOut)
+@router.post("", response_model=schemas.ContoOut)
 def create_conto(conto: schemas.ContoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     new_conto = models.Conto(**conto.model_dump(), user_id=current_user_id)
     db.add(new_conto)
@@ -18,7 +18,7 @@ def create_conto(conto: schemas.ContoCreate, db: Session = Depends(get_db), curr
     db.refresh(new_conto)
     return new_conto
 
-@router.get("/", response_model=list[schemas.ContoOut])
+@router.get("", response_model=list[schemas.ContoOut])
 def get_conti(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     return db.query(models.Conto).filter(models.Conto.user_id == current_user_id).all()
 

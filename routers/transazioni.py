@@ -10,7 +10,7 @@ router = APIRouter(
 
 # --- ENDPOINT TRANSAZIONI ---
 
-@router.post("/transazione", response_model=schemas.TransazioneOut)
+@router.post("", response_model=schemas.TransazioneOut)
 def create_transazione(trans: schemas.TransazioneCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     conto = db.query(models.Conto).filter(models.Conto.id == trans.conto_id, models.Conto.user_id == current_user_id).first()
     if not conto:
@@ -28,7 +28,7 @@ def create_transazione(trans: schemas.TransazioneCreate, db: Session = Depends(g
     db.refresh(new_trans)
     return new_trans
 
-@router.get("/transazioni", response_model=list[schemas.TransazioneOut])
+@router.get("", response_model=list[schemas.TransazioneOut])
 def get_transazioni(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
@@ -38,7 +38,7 @@ def get_transazioni(
         models.Conto.user_id == current_user_id
     ).all()
 
-@router.put("/transazione/{transazione_id}", response_model=schemas.TransazioneOut)
+@router.put("/{transazione_id}", response_model=schemas.TransazioneOut)
 def update_transazione(
     transazione_id: int, 
     trans_data: schemas.TransazioneCreate, 
@@ -75,7 +75,7 @@ def update_transazione(
     db.refresh(db_trans)
     return db_trans
 
-@router.delete("/transazione/{transazione_id}")
+@router.delete("/{transazione_id}")
 def delete_transazione(transazione_id: int, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     db_trans = db.query(models.Transazione).join(models.Conto).filter(
         models.Transazione.id == transazione_id, models.Conto.user_id == current_user_id
@@ -94,7 +94,7 @@ def delete_transazione(transazione_id: int, db: Session = Depends(get_db), curre
     db.commit()
     return {"message": "Eliminata"}
 
-@router.get("/transazioni/tag/{tag_id}")
+@router.get("/tag/{tag_id}")
 def get_transazioni_by_tag(
     tag_id: int, 
     db: Session = Depends(get_db), 

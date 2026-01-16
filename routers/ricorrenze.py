@@ -6,7 +6,7 @@ import models, schemas, auth
 
 router = APIRouter(prefix="/ricorrenze", tags=["Ricorrenze"])
 
-@router.post("/", response_model=schemas.RicorrenzaOut)
+@router.post("", response_model=schemas.RicorrenzaOut)
 def create_ricorrenza(
     ricorrenza: schemas.RicorrenzaCreate, 
     db: Session = Depends(get_db), 
@@ -23,7 +23,7 @@ def create_ricorrenza(
     db.refresh(new_ric)
     return new_ric
 
-@router.get("/", response_model=List[schemas.RicorrenzaOut])
+@router.get("", response_model=List[schemas.RicorrenzaOut])
 def get_ricorrenze(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
