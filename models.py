@@ -103,3 +103,22 @@ class StoricoInvestimento(Base):
     prezzo_unitario = Column(Float)
     valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
     investimento = relationship("Investimento", back_populates="storico")
+
+class Ricorrenza(Base):
+    __tablename__ = "ricorrenze"
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False) # Es: "Affitto", "Netflix"
+    importo = Column(Float, nullable=False)
+    tipo = Column(String, nullable=False) # ENTRATA o USCITA
+    frequenza = Column(String, nullable=False) # GIORNALIERA, SETTIMANALE, MENSILE, ANNUALE
+    prossima_esecuzione = Column(Date, nullable=False) # La data in cui dovrà scattare
+    attiva = Column(Boolean, default=True)
+
+    # Chiavi esterne (template per la transazione futura)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    conto_id = Column(Integer, ForeignKey("conti.id"))
+    categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
+    tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
+
+    owner = relationship("User")
+    conto = relationship("Conto")

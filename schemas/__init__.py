@@ -5,3 +5,4 @@ from .sottocategoria import SottocategoriaCreate, SottocategoriaOut, Sottocatego
 from .tag import TagCreate, TagOut
 from .transazione import TransazioneCreate, TransazioneOut
 from .investimento import InvestimentoCreate, InvestimentoOut, StoricoInvestimentoCreate, StoricoInvestimentoOut
+from .ricorrenza import RicorrenzaCreate, RicorrenzaUpdate, RicorrenzaOut

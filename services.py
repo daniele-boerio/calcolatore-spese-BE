@@ -1,8 +1,9 @@
 import yfinance as yf
-from datetime import date
+from datetime import date, timedelta, datetime
 import logging
 from database import SessionLocal
 import models
+from dateutil.relativedelta import relativedelta
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -63,3 +64,47 @@ def task_aggiornamento_prezzi():
         logger.error(f"Errore fatale nel task: {e}")
     finally:
         db.close()
+
+def task_transazioni_ricorrenti():
+    db = SessionLocal()
+    today = date.today()
+    
+    # 1. Trova tutte le ricorrenze attive che devono essere eseguite oggi o prima
+    ricorrenze = db.query(models.Ricorrenza).filter(
+        models.Ricorrenza.attiva == True,
+        models.Ricorrenza.prossima_esecuzione <= today
+    ).all()
+
+    for ric in ricorrenze:
+        # 2. Crea la transazione reale
+        nuova_trans = models.Transazione(
+            importo=ric.importo,
+            tipo=ric.tipo,
+            descrizione=f"Ricorrente: {ric.nome}",
+            data=datetime.combine(ric.prossima_esecuzione, datetime.min.time()),
+            conto_id=ric.conto_id,
+            categoria_id=ric.categoria_id,
+            tag_id=ric.tag_id
+        )
+        
+        # 3. Aggiorna il saldo del conto associato
+        conto = db.query(models.Conto).get(ric.conto_id)
+        if ric.tipo.upper() == "ENTRATA":
+            conto.saldo += ric.importo
+        else:
+            conto.saldo -= ric.importo
+
+        # 4. Calcola la prossima data di esecuzione
+        if ric.frequenza == "GIORNALIERA":
+            ric.prossima_esecuzione += timedelta(days=1)
+        elif ric.frequenza == "SETTIMANALE":
+            ric.prossima_esecuzione += timedelta(weeks=1)
+        elif ric.frequenza == "MENSILE":
+            ric.prossima_esecuzione += relativedelta(months=1)
+        elif ric.frequenza == "ANNUALE":
+            ric.prossima_esecuzione += relativedelta(years=1)
+
+        db.add(nuova_trans)
+    
+    db.commit()
+    db.close()
