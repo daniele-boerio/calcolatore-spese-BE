@@ -1,21 +1,31 @@
 from pydantic import BaseModel
 from typing import Optional
+from datetime import date
 
-# 1. Base: Campi comuni a tutte le operazioni sui conti
 class ContoBase(BaseModel):
     nome: str
     saldo: float
+    # Nuovi campi per ricarica automatica
+    ricarica_automatica: bool = False
+    budget_obiettivo: Optional[float] = None
+    soglia_minima: Optional[float] = None
+    conto_sorgente_id: Optional[int] = None
+    frequenza_controllo: Optional[str] = None # "SETTIMANALE" o "MENSILE"
+    prossimo_controllo: Optional[date] = None
 
-# 2. Create: Eredita tutto dalla Base (usato per la creazione iniziale)
 class ContoCreate(ContoBase):
     pass
 
-# 3. Update: Campi opzionali (usato per modificare solo il nome o solo il saldo)
 class ContoUpdate(BaseModel):
     nome: Optional[str] = None
     saldo: Optional[float] = None
+    ricarica_automatica: Optional[bool] = None
+    budget_obiettivo: Optional[float] = None
+    soglia_minima: Optional[float] = None
+    conto_sorgente_id: Optional[int] = None
+    frequenza_controllo: Optional[str] = None
+    prossimo_controllo: Optional[date] = None
 
-# 4. Out: Risposta inviata al Frontend (aggiunge ID e user_id)
 class ContoOut(ContoBase):
     id: int
     user_id: int

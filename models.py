@@ -23,6 +23,14 @@ class Conto(Base):
     nome = Column(String, nullable=False)
     saldo = Column(Float, nullable=False, default=0.0) # Saldo dinamico
     user_id = Column(Integer, ForeignKey("users.id"))
+
+    # --- Nuovi campi per Satispay-style ---
+    ricarica_automatica = Column(Boolean, default=False)
+    budget_obiettivo = Column(Float, nullable=True)  # Il valore a cui deve tornare il saldo
+    soglia_minima = Column(Float, nullable=True)    # Il valore sotto il quale scatta la ricarica
+    conto_sorgente_id = Column(Integer, ForeignKey("conti.id"), nullable=True) # Da dove prendiamo i soldi
+    frequenza_controllo = Column(String, nullable=True) # "SETTIMANALE" o "MENSILE"
+    prossimo_controllo = Column(Date, nullable=True)    # Quando effettuare il prossimo check
     
     owner = relationship("User", back_populates="conti")
     transazioni = relationship("Transazione", back_populates="conto", cascade="all, delete-orphan")

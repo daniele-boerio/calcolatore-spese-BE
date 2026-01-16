@@ -108,3 +108,53 @@ def task_transazioni_ricorrenti():
     
     db.commit()
     db.close()
+
+def task_ricarica_automatica_conti():
+    db = SessionLocal()
+    today = date.today()
+    
+    # Trova i conti con ricarica attiva che devono essere controllati oggi
+    conti_da_controllare = db.query(models.Conto).filter(
+        models.Conto.ricarica_automatica == True,
+        models.Conto.prossimo_controllo <= today
+    ).all()
+
+    for conto in conti_da_controllare:
+        # Se il saldo è sceso sotto la soglia minima
+        if conto.saldo < conto.soglia_minima:
+            importo_ricarica = conto.budget_obiettivo - conto.saldo
+            conto_sorgente = db.query(models.Conto).get(conto.conto_sorgente_id)
+
+            if conto_sorgente and conto_sorgente.saldo >= importo_ricarica:
+                # 1. Crea la transazione di uscita dal conto sorgente
+                uscita = models.Transazione(
+                    importo=importo_ricarica,
+                    tipo="USCITA",
+                    descrizione=f"Ricarica automatica verso {conto.nome}",
+                    data=datetime.now(),
+                    conto_id=conto_sorgente.id
+                )
+                # 2. Crea la transazione di entrata nel conto target
+                entrata = models.Transazione(
+                    importo=importo_ricarica,
+                    tipo="ENTRATA",
+                    descrizione=f"Ricarica automatica da {conto_sorgente.nome}",
+                    data=datetime.now(),
+                    conto_id=conto.id
+                )
+                
+                # Aggiorna i saldi
+                conto_sorgente.saldo -= importo_ricarica
+                conto.saldo += importo_ricarica
+                
+                db.add(uscita)
+                db.add(entrata)
+
+        # 4. Calcola il prossimo controllo
+        if conto.frequenza_controllo == "SETTIMANALE":
+            conto.prossimo_controllo = today + timedelta(weeks=1)
+        elif conto.frequenza_controllo == "MENSILE":
+            conto.prossimo_controllo = today + relativedelta(months=1)
+
+    db.commit()
+    db.close()
