@@ -11,19 +11,34 @@ router = APIRouter(
 # --- ENDPOINT TRANSAZIONI ---
 
 @router.post("", response_model=schemas.TransazioneOut)
-def create_transazione(trans: schemas.TransazioneCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    conto = db.query(models.Conto).filter(models.Conto.id == trans.conto_id, models.Conto.user_id == current_user_id).first()
-    if not conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato")
+def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+    
+    # 1. Se è un RIMBORSO, verifichiamo che il padre esista e sia dell'utente
+    if transazione.tipo == "RIMBORSO":
+        if not transazione.parent_transaction_id:
+            raise HTTPException(status_code=400, detail="ID transazione originale mancante")
+        
+        parent = db.query(models.Transazione).join(models.Conto).filter(
+            models.Transazione.id == transazione.parent_transaction_id,
+            models.Conto.user_id == current_user_id
+        ).first()
+        
+        if not parent:
+            raise HTTPException(status_code=404, detail="Spesa originale non trovata")
 
-    # Aggiornamento saldo
-    if trans.tipo.upper() == "ENTRATA":
-        conto.saldo += trans.importo
-    else:
-        conto.saldo -= trans.importo
-
-    new_trans = models.Transazione(**trans.model_dump())
+    # 2. Creazione (il model_dump include parent_transaction_id)
+    new_trans = models.Transazione(**transazione.model_dump())
     db.add(new_trans)
+
+    # 3. Gestione Saldo (Importante!)
+    conto = db.query(models.Conto).filter(models.Conto.id == transazione.conto_id).first()
+    
+    if transazione.tipo == "USCITA":
+        conto.saldo -= transazione.importo
+    else:
+        # Se è ENTRATA o RIMBORSO, aggiungiamo al saldo
+        conto.saldo += transazione.importo
+
     db.commit()
     db.refresh(new_trans)
     return new_trans

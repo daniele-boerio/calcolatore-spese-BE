@@ -88,8 +88,17 @@ class Transazione(Base):
     conto = relationship("Conto", back_populates="transazioni")
     tag = relationship("Tag", back_populates="transazioni")
 
-    parent_transaction_id = Column(Integer, ForeignKey("transazioni.id"), nullable=True)
-    rimborsi = relationship("Transazione", backref=backref("parent", remote_side=[id]))
+    parent_transaction_id = Column(
+        Integer, 
+        ForeignKey("transazioni.id", ondelete="CASCADE"), 
+        nullable=True
+    )
+    rimborsi = relationship(
+        "Transazione", 
+        backref=backref("parent", remote_side=[id]),
+        cascade="all, delete-orphan", # Se elimino il padre, elimina i figli
+        passive_deletes=True          # Delega al DB il cascade della FK
+    )
 
 class Investimento(Base):
     __tablename__ = "investimenti"

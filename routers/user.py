@@ -1,10 +1,10 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from database import get_db
 import models, schemas, auth
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
-from sqlalchemy import func, or_, and_
+from sqlalchemy import func, case
 
 router = APIRouter(
     tags=["User"]        # Raggruppa questi endpoint nella documentazione Swagger
@@ -66,34 +66,48 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     }
 
 @router.get("/currentMonthExpenses")
-def get_current_month_expenses(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+def get_current_month_expenses(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
     user = db.query(models.User).filter(models.User.id == current_user_id).first()
+    
+    # Calcolo dell'intervallo temporale (inizio mese corrente)
     today = datetime.now()
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # 1. Somma di tutte le USCITE del mese
-    total_out = db.query(func.sum(models.Transazione.importo)).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id,
-        models.Transazione.tipo == "USCITA",
-        models.Transazione.data >= first_day
-    ).scalar() or 0.0
+    # 1. Calcoliamo il totale delle USCITE
+    total_out = db.query(func.sum(models.Transazione.importo))\
+        .join(models.Conto)\
+        .filter(
+            models.Conto.user_id == current_user_id,
+            models.Transazione.tipo == "USCITA",
+            models.Transazione.data >= first_day
+        ).scalar() or 0.0
 
-    # Somma RIMBORSI (Sottraggono dalle uscite)
-    total_refunds = db.query(func.sum(models.Transazione.importo)).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id,
-        models.Transazione.tipo == "RIMBORSO",
-        models.Transazione.data >= first_day
-    ).scalar() or 0.0
+    # 2. Calcoliamo il totale dei RIMBORSI
+    # Nota: qui non ci interessa a quale categoria appartengano, 
+    # perché il rimborso è un recupero di liquidità totale sul mese.
+    total_refunds = db.query(func.sum(models.Transazione.importo))\
+        .join(models.Conto)\
+        .filter(
+            models.Conto.user_id == current_user_id,
+            models.Transazione.tipo == "RIMBORSO",
+            models.Transazione.data >= first_day
+        ).scalar() or 0.0
 
-    # Spesa reale = Uscite - Rimborsi
+    # Spesa netta reale
     net_expenses = max(0, total_out - total_refunds)
 
-    percentage = round((net_expenses / user.total_budget * 100), 1) if user.total_budget else None
+    # Calcolo percentuale rispetto al budget totale dell'utente
+    percentage = None
+    if user.total_budget and user.total_budget > 0:
+        percentage = round((net_expenses / user.total_budget * 100), 1)
 
     return {
         "monthly_budget": {
             "totalBudget": user.total_budget,
-            "expenses": net_expenses, # Restituiamo il valore netto
+            "expenses": round(net_expenses, 2),
             "percentage": percentage
         }
     }
@@ -103,35 +117,34 @@ def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int
     today = datetime.now()
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # 1. Carichiamo le uscite normali
-    uscite_per_cat = db.query(
-        models.Categoria.nome.label("category"),
-        func.sum(models.Transazione.importo).label("amount")
-    ).join(models.Transazione).join(models.Conto).filter(
+    # Recuperiamo le USCITE del mese
+    # Usando joinedload(models.Transazione.rimborsi) carichiamo i rimborsi in un'unica query (ottimizzazione)
+    uscite = db.query(models.Transazione).options(
+        joinedload(models.Transazione.rimborsi)
+    ).join(models.Conto).filter(
         models.Conto.user_id == current_user_id,
         models.Transazione.tipo == "USCITA",
         models.Transazione.data >= first_day
-    ).group_by(models.Categoria.nome).all()
-
-    stats = {row.category: float(row.amount) for row in uscite_per_cat}
-
-    # 2. Carichiamo i rimborsi e troviamo a quale categoria del parent appartengono
-    rimborsi = db.query(
-        models.Transazione.importo,
-        models.Transazione.parent_transaction_id
-    ).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id,
-        models.Transazione.tipo == "RIMBORSO",
-        models.Transazione.data >= first_day,
-        models.Transazione.parent_transaction_id != None
     ).all()
 
-    for r in rimborsi:
-        # Recuperiamo il parent per sapere la categoria da stornare
-        parent = db.query(models.Transazione).filter(models.Transazione.id == r.parent_transaction_id).first()
-        if parent and parent.categoria:
-            cat_nome = parent.categoria.nome
-            if cat_nome in stats:
-                stats[cat_nome] -= float(r.importo)
+    stats = {}
 
-    return [{"label": cat, "value": round(val, 2)} for cat, val in stats.items() if val > 0]
+    for u in uscite:
+        cat_nome = u.categoria.nome if u.categoria else "Senza Categoria"
+        
+        # Calcoliamo il totale dei rimborsi per QUESTA specifica transazione
+        # Accediamo a u.rimborsi grazie alla relationship nel modello
+        totale_rimborsi = sum(r.importo for r in u.rimborsi)
+        
+        # Il valore netto per questa transazione
+        importo_netto = u.importo - totale_rimborsi
+        
+        if cat_nome not in stats:
+            stats[cat_nome] = 0.0
+        stats[cat_nome] += importo_netto
+
+    # Formattazione per il frontend
+    return [
+        {"label": cat, "value": round(val, 2)} 
+        for cat, val in stats.items() if val > 0
+    ]
