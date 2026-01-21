@@ -4,7 +4,7 @@ from database import get_db
 import models, schemas, auth
 from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
-from sqlalchemy import func
+from sqlalchemy import func, or_, and_
 
 router = APIRouter(
     tags=["User"]        # Raggruppa questi endpoint nella documentazione Swagger
@@ -69,55 +69,69 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
 def get_current_month_expenses(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     user = db.query(models.User).filter(models.User.id == current_user_id).first()
     today = datetime.now()
-    first_day = today.replace(day=1, hour=0, minute=0)
+    first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    expenses = db.query(func.sum(models.Transazione.importo)).join(models.Conto).filter(
+    # 1. Somma di tutte le USCITE del mese
+    total_out = db.query(func.sum(models.Transazione.importo)).join(models.Conto).filter(
         models.Conto.user_id == current_user_id,
         models.Transazione.tipo == "USCITA",
         models.Transazione.data >= first_day
     ).scalar() or 0.0
 
-    percentage = round((expenses / user.total_budget * 100), 1) if user.total_budget else None
+    # Somma RIMBORSI (Sottraggono dalle uscite)
+    total_refunds = db.query(func.sum(models.Transazione.importo)).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id,
+        models.Transazione.tipo == "RIMBORSO",
+        models.Transazione.data >= first_day
+    ).scalar() or 0.0
+
+    # Spesa reale = Uscite - Rimborsi
+    net_expenses = max(0, total_out - total_refunds)
+
+    percentage = round((net_expenses / user.total_budget * 100), 1) if user.total_budget else None
 
     return {
         "monthly_budget": {
             "totalBudget": user.total_budget,
-            "expenses": expenses,
+            "expenses": net_expenses, # Restituiamo il valore netto
             "percentage": percentage
         }
     }
 
 @router.get("/expensesByCategory")
-def get_expenses_by_category(
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    # Calcoliamo il primo giorno del mese corrente
+def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     today = datetime.now()
-    first_day_of_month = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Query: Uniamo Categorie -> Transazioni -> Conti
-    # Raggruppiamo per il nome della categoria e sommiamo l'importo
-    results = db.query(
+    # 1. Carichiamo le uscite normali
+    uscite_per_cat = db.query(
         models.Categoria.nome.label("category"),
-        func.sum(models.Transazione.importo).label("total")
-    ).join(
-        models.Transazione, models.Transazione.categoria_id == models.Categoria.id
-    ).join(
-        models.Conto, models.Transazione.conto_id == models.Conto.id
-    ).filter(
+        func.sum(models.Transazione.importo).label("amount")
+    ).join(models.Transazione).join(models.Conto).filter(
         models.Conto.user_id == current_user_id,
         models.Transazione.tipo == "USCITA",
-        models.Transazione.data >= first_day_of_month
-    ).group_by(
-        models.Categoria.nome
+        models.Transazione.data >= first_day
+    ).group_by(models.Categoria.nome).all()
+
+    stats = {row.category: float(row.amount) for row in uscite_per_cat}
+
+    # 2. Carichiamo i rimborsi e troviamo a quale categoria del parent appartengono
+    rimborsi = db.query(
+        models.Transazione.importo,
+        models.Transazione.parent_transaction_id
+    ).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id,
+        models.Transazione.tipo == "RIMBORSO",
+        models.Transazione.data >= first_day,
+        models.Transazione.parent_transaction_id != None
     ).all()
 
-    # Formattiamo i dati in un array di oggetti pronto per il PieChart del Frontend
-    # Esempio: [{ "label": "Cibo", "value": 150.0 }, ...]
-    formatted_data = [
-        {"label": row.category, "value": float(row.total)} 
-        for row in results
-    ]
+    for r in rimborsi:
+        # Recuperiamo il parent per sapere la categoria da stornare
+        parent = db.query(models.Transazione).filter(models.Transazione.id == r.parent_transaction_id).first()
+        if parent and parent.categoria:
+            cat_nome = parent.categoria.nome
+            if cat_nome in stats:
+                stats[cat_nome] -= float(r.importo)
 
-    return formatted_data
+    return [{"label": cat, "value": round(val, 2)} for cat, val in stats.items() if val > 0]

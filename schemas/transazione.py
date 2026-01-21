@@ -13,6 +13,7 @@ class TransazioneBase(BaseModel):
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
+    parent_transaction_id: Optional[int] = None
 
 # 2. Create: Eredita tutto dalla Base (non serve aggiungere altro)
 class TransazioneCreate(TransazioneBase):
