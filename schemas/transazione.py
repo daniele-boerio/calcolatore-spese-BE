@@ -29,3 +29,9 @@ class TransazioneOut(TransazioneBase):
 
     class Config:
         from_attributes = True
+
+class TransazionePagination(BaseModel):
+    total: int        # Numero totale di transazioni per l'utente
+    page: int         # Pagina attuale
+    size: int         # Numero di elementi per pagina
+    data: list[TransazioneOut] # La lista effettiva delle transazioni

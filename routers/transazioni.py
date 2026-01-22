@@ -1,3 +1,4 @@
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -43,15 +44,43 @@ def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Dep
     db.refresh(new_trans)
     return new_trans
 
-@router.get("", response_model=list[schemas.TransazioneOut])
-def get_transazioni(
-    db: Session = Depends(get_db), 
+@router.get("/{n}", response_model=list[schemas.TransazioneOut])
+def get_recent_transazioni(
+    n: int,
+    db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Recuperiamo tutte le transazioni filtrando attraverso i conti dell'utente
+    # Recupera solo gli ultimi n record in ordine cronologico decrescente
     return db.query(models.Transazione).join(models.Conto).filter(
         models.Conto.user_id == current_user_id
-    ).all()
+    ).order_by(models.Transazione.data.desc()).limit(n).all()
+
+@router.get("/paginated", response_model=schemas.TransazionePagination)
+def get_transazioni(
+    page: int = 1,
+    size: int = 10,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    offset = (page - 1) * size
+    
+    # Query di base
+    query = db.query(models.Transazione).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id
+    )
+    
+    # Conteggio totale per la paginazione nel frontend
+    total = query.count()
+    
+    # Recupero dati della pagina specifica
+    data = query.order_by(models.Transazione.data.desc()).offset(offset).limit(size).all()
+    
+    return {
+        "total": total,
+        "page": page,
+        "size": size,
+        "data": data
+    }
 
 @router.put("/{transazione_id}", response_model=schemas.TransazioneOut)
 def update_transazione(
