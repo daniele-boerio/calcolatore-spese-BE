@@ -72,7 +72,7 @@ def get_transazioni(
         "data": data
     }
 
-@router.get("/", response_model=list[schemas.TransazioneOut])
+@router.get("", response_model=list[schemas.TransazioneOut])
 def get_recent_transazioni(
     n: int,
     db: Session = Depends(get_db),
