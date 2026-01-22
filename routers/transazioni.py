@@ -45,17 +45,6 @@ def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Dep
     db.refresh(new_trans)
     return new_trans
 
-@router.get("/{n}", response_model=list[schemas.TransazioneOut])
-def get_recent_transazioni(
-    n: int,
-    db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id)
-):
-    # Recupera solo gli ultimi n record in ordine cronologico decrescente
-    return db.query(models.Transazione).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id
-    ).order_by(models.Transazione.data.desc()).limit(n).all()
-
 @router.get("/paginated", response_model=schemas.TransazionePagination)
 def get_transazioni(
     page: int = 1,
@@ -82,6 +71,17 @@ def get_transazioni(
         "size": size,
         "data": data
     }
+
+@router.get("/", response_model=list[schemas.TransazioneOut])
+def get_recent_transazioni(
+    n: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Recupera solo gli ultimi n record in ordine cronologico decrescente
+    return db.query(models.Transazione).join(models.Conto).filter(
+        models.Conto.user_id == current_user_id
+    ).order_by(models.Transazione.data.desc()).limit(n).all()
 
 @router.put("/{transazione_id}", response_model=schemas.TransazioneOut)
 def update_transazione(
