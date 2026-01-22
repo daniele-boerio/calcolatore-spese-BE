@@ -1,12 +1,19 @@
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime
+from enum import Enum
 from .tag import TagOut  # Import relativo dal file tag.py nella stessa cartella
+
+class TipoTransazione(str, Enum):
+    ENTRATA = "ENTRATA"
+    USCITA = "USCITA"
+    RIMBORSO = "RIMBORSO"
 
 # 1. Base: Campi comuni sia alla creazione che alla visualizzazione
 class TransazioneBase(BaseModel):
     importo: float
-    tipo: str
+    # Usiamo l'Enum qui per la validazione automatica
+    tipo: TipoTransazione 
     data: Optional[datetime] = None
     descrizione: Optional[str] = None
     conto_id: int

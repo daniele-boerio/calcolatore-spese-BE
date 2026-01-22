@@ -6,6 +6,8 @@ from fastapi.security import OAuth2PasswordRequestForm
 from datetime import datetime
 from sqlalchemy import func, case
 
+from schemas.transazione import TipoTransazione
+
 router = APIRouter(
     tags=["User"]        # Raggruppa questi endpoint nella documentazione Swagger
 )
@@ -81,7 +83,7 @@ def get_current_month_expenses(
         .join(models.Conto)\
         .filter(
             models.Conto.user_id == current_user_id,
-            models.Transazione.tipo == "USCITA",
+            models.Transazione.tipo == TipoTransazione.USCITA,
             models.Transazione.data >= first_day
         ).scalar() or 0.0
 
@@ -92,7 +94,7 @@ def get_current_month_expenses(
         .join(models.Conto)\
         .filter(
             models.Conto.user_id == current_user_id,
-            models.Transazione.tipo == "RIMBORSO",
+            models.Transazione.tipo == TipoTransazione.RIMBORSO,
             models.Transazione.data >= first_day
         ).scalar() or 0.0
 
@@ -123,7 +125,7 @@ def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int
         joinedload(models.Transazione.rimborsi)
     ).join(models.Conto).filter(
         models.Conto.user_id == current_user_id,
-        models.Transazione.tipo == "USCITA",
+        models.Transazione.tipo == TipoTransazione.USCITA,
         models.Transazione.data >= first_day
     ).all()
 

@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 import models, schemas, auth
+from schemas.transazione import TipoTransazione
 
 router = APIRouter(
     prefix="/transazioni",      # Tutti gli endpoint in questo file inizieranno con /transazioni
@@ -15,7 +16,7 @@ router = APIRouter(
 def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
     
     # 1. Se è un RIMBORSO, verifichiamo che il padre esista e sia dell'utente
-    if transazione.tipo == "RIMBORSO":
+    if transazione.tipo == TipoTransazione.RIMBORSO:
         if not transazione.parent_transaction_id:
             raise HTTPException(status_code=400, detail="ID transazione originale mancante")
         
@@ -34,7 +35,7 @@ def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Dep
     # 3. Gestione Saldo (Importante!)
     conto = db.query(models.Conto).filter(models.Conto.id == transazione.conto_id).first()
     
-    if transazione.tipo == "USCITA":
+    if transazione.tipo == TipoTransazione.USCITA:
         conto.saldo -= transazione.importo
     else:
         # Se è ENTRATA o RIMBORSO, aggiungiamo al saldo
