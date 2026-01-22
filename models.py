@@ -93,6 +93,7 @@ class Transazione(Base):
         ForeignKey("transazioni.id", ondelete="CASCADE"), 
         nullable=True
     )
+    categoria = relationship("Categoria", back_populates="transazioni")
     rimborsi = relationship(
         "Transazione", 
         backref=backref("parent", remote_side=[id]),
