@@ -4,7 +4,7 @@ import models
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 from services import task_aggiornamento_prezzi, task_transazioni_ricorrenti, task_ricarica_automatica_conti
-from routers import conti, categorie, transazioni, investimenti, budget, user, sottocategorie, tag, ricorrenze
+from routers import conti, categorie, transazioni, investimenti, user, sottocategorie, tag, ricorrenze
 
 app = FastAPI(title="Calcolatore Spese API")
 
