@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -81,7 +81,7 @@ def get_current_month_expenses(
         raise HTTPException(status_code=404, detail="Utente non trovato")
     
     # Calcolo dell'intervallo temporale (inizio mese corrente)
-    today = datetime.now(datetime.timezone.utc)
+    today = datetime.now(timezone.utc)
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # 1. Calcoliamo il totale delle USCITE
@@ -122,7 +122,7 @@ def get_current_month_expenses(
 
 @router.get("/expensesByCategory")
 def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    today = datetime.now(datetime.timezone.utc)
+    today = datetime.now(timezone.utc)
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     # Recuperiamo tutte le transazioni (Uscite e Rimborsi) del mese
