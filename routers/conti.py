@@ -1,7 +1,7 @@
-import datetime
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Conto, Transazione, User

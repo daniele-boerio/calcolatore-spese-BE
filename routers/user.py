@@ -1,6 +1,5 @@
-import datetime
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session
 from database import get_db
 from routers.conti import get_current_month_expenses
 import auth
