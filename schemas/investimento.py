@@ -7,9 +7,9 @@ from datetime import date
 
 class InvestimentoBase(BaseModel):
     isin: str
-    nome_titolo: str
     ticker: Optional[str] = None
-
+    nome_titolo: str
+    
 class InvestimentoCreate(InvestimentoBase):
     pass
 

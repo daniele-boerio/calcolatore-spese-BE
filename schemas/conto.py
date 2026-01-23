@@ -6,7 +6,6 @@ from datetime import date
 class ContoBase(BaseModel):
     nome: str
     saldo: float
-    # Nuovi campi per ricarica automatica
     ricarica_automatica: bool = False
     budget_obiettivo: Optional[float] = None
     soglia_minima: Optional[float] = None

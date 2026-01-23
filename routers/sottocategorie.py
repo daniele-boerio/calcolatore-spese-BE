@@ -32,7 +32,8 @@ def add_sottocategorie(
     for sub_data in sub_data_list:
         new_sub = Sottocategoria(
             nome=sub_data.nome, 
-            categoria_id=categoria_id
+            categoria_id=categoria_id,
+            user_id = current_user_id
         )
         db.add(new_sub)
         new_subcategories.append(new_sub)

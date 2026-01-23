@@ -11,6 +11,7 @@ class RicorrenzaBase(BaseModel):
     tipo: TipoTransazione  # "ENTRATA", "USCITA" o "RIMBORSO"
     frequenza: str  # "GIORNALIERA", "SETTIMANALE", "MENSILE", "ANNUALE"
     prossima_esecuzione: date
+    attiva: Optional[bool] = True
     conto_id: int
     categoria_id: Optional[int] = None
     tag_id: Optional[int] = None
