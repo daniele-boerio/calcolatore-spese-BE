@@ -24,7 +24,6 @@ app.include_router(categorie.router)      # Categorie
 app.include_router(sottocategorie.router) # Sottocategorie
 app.include_router(transazioni.router)    # Transazioni
 app.include_router(investimenti.router)   # Investimenti
-app.include_router(budget.router)         # Budget e Tag
 app.include_router(tag.router)            # Tag
 app.include_router(ricorrenze.router)     # Ricorrenze
 

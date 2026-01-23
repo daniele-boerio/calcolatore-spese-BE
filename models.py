@@ -1,6 +1,6 @@
 from sqlalchemy import Column, Integer, Float, String, DateTime, ForeignKey, Boolean, Date, Table
 from sqlalchemy.orm import relationship
-from datetime import datetime
+from datetime import datetime, timezone
 from database import Base
 from sqlalchemy.orm import relationship, backref
 
@@ -12,17 +12,21 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     total_budget = Column(Float, nullable=True) # Per la BudgetCard
 
-    conti = relationship("Conto", back_populates="owner", cascade="all, delete-orphan")
-    categorie = relationship("Categoria", back_populates="owner", cascade="all, delete-orphan")
-    tags = relationship("Tag", back_populates="owner", cascade="all, delete-orphan")
+    conti = relationship("Conto", cascade="all, delete-orphan")
     investimenti = relationship("Investimento", cascade="all, delete-orphan")
+    
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class Conto(Base):
     __tablename__ = "conti"
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
     saldo = Column(Float, nullable=False, default=0.0) # Saldo dinamico
-    user_id = Column(Integer, ForeignKey("users.id"))
 
     # --- Nuovi campi per Satispay-style ---
     ricarica_automatica = Column(Boolean, default=False)
@@ -31,26 +35,33 @@ class Conto(Base):
     conto_sorgente_id = Column(Integer, ForeignKey("conti.id"), nullable=True) # Da dove prendiamo i soldi
     frequenza_controllo = Column(String, nullable=True) # "SETTIMANALE" o "MENSILE"
     prossimo_controllo = Column(Date, nullable=True)    # Quando effettuare il prossimo check
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
-    owner = relationship("User", back_populates="conti")
-    transazioni = relationship("Transazione", back_populates="conto", cascade="all, delete-orphan")
+    transazioni = relationship("Transazione", cascade="all, delete-orphan")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class Categoria(Base):
     __tablename__ = "categorie"
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
-    # Relazioni
-    owner = relationship("User", back_populates="categorie")
-    
-    # Questa relazione punta alla tabella Sottocategoria
-    # Usiamo 'sottocategorie' al plurale perché un padre ha molti figli
-    sottocategorie = relationship(
-        "Sottocategoria", 
-        back_populates="categoria_padre", 
-        cascade="all, delete-orphan"
+    # Una categoria ha più sottocategorie
+    sottocategorie = relationship("Sottocategoria", cascade="all, delete-orphan")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
     )
 
 class Sottocategoria(Base):
@@ -58,10 +69,17 @@ class Sottocategoria(Base):
     
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    # Si riferisce a una sola categoria
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="CASCADE"))
-    
-    # Relazione inversa: punta alla categoria singola
-    categoria_padre = relationship("Categoria", back_populates="sottocategorie")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class Tag(Base):
     __tablename__ = "tags"
@@ -69,36 +87,46 @@ class Tag(Base):
     nome = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
-    owner = relationship("User", back_populates="tags")
-    transazioni = relationship("Transazione", back_populates="tag")
+    # Si riferisce a diverse transazioni
+    transazioni = relationship("Transazione")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class Transazione(Base):
     __tablename__ = "transazioni"
     id = Column(Integer, primary_key=True, index=True)
     importo = Column(Float, nullable=False)
     tipo = Column(String, nullable=False) # "ENTRATA", "USCITA" o "RIMBORSO"
-    data = Column(DateTime, default=datetime.utcnow)
+    data = Column(DateTime)
     descrizione = Column(String)
-    
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
     sottocategoria_id = Column(Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True)
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
     
-    conto = relationship("Conto", back_populates="transazioni")
-    tag = relationship("Tag", back_populates="transazioni")
-
+    # per i rimborsi, collega la transazione al padre
     parent_transaction_id = Column(
         Integer, 
         ForeignKey("transazioni.id", ondelete="CASCADE"), 
         nullable=True
     )
+
+    # Relazioni
     categoria = relationship("Categoria")
-    rimborsi = relationship(
-        "Transazione", 
-        backref=backref("parent", remote_side=[id]),
-        cascade="all, delete-orphan", # Se elimino il padre, elimina i figli
-        passive_deletes=True          # Delega al DB il cascade della FK
+    sottocategoria = relationship("Sottocategoria")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
     )
 
 class Investimento(Base):
@@ -113,7 +141,14 @@ class Investimento(Base):
     prezzo_attuale = Column(Float, nullable=True)
     data_ultimo_aggiornamento = Column(Date, nullable=True)
     
-    storico = relationship("StoricoInvestimento", back_populates="investimento")
+    storico = relationship("StoricoInvestimento", cascade="all, delete-orphan")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class StoricoInvestimento(Base):
     __tablename__ = "storico_investimenti"
@@ -123,7 +158,13 @@ class StoricoInvestimento(Base):
     quantita = Column(Float) # Positiva per acquisto, negativa per vendita
     prezzo_unitario = Column(Float)
     valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
-    investimento = relationship("Investimento", back_populates="storico")
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )
 
 class Ricorrenza(Base):
     __tablename__ = "ricorrenze"
@@ -141,5 +182,9 @@ class Ricorrenza(Base):
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True)
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
 
-    owner = relationship("User")
-    conto = relationship("Conto")
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime, 
+        default=lambda: datetime.now(timezone.utc), 
+        onupdate=lambda: datetime.now(timezone.utc)
+    )

@@ -2,8 +2,10 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
-import models, schemas, auth
+import auth
+from schemas import TransazioneCreate, TransazioneOut, TransazionePagination, TransazioneUpdate
 from schemas.transazione import TipoTransazione
+from models import Conto, Transazione
 
 router = APIRouter(
     prefix="/transazioni",      # Tutti gli endpoint in questo file inizieranno con /transazioni
@@ -12,40 +14,45 @@ router = APIRouter(
 
 # --- ENDPOINT TRANSAZIONI ---
 
-@router.post("", response_model=schemas.TransazioneOut)
-def create_transazione(transazione: schemas.TransazioneCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    
-    # 1. Se è un RIMBORSO, verifichiamo che il padre esista e sia dell'utente
-    if transazione.tipo == TipoTransazione.RIMBORSO:
-        if not transazione.parent_transaction_id:
-            raise HTTPException(status_code=400, detail="ID transazione originale mancante")
-        
-        parent = db.query(models.Transazione).join(models.Conto).filter(
-            models.Transazione.id == transazione.parent_transaction_id,
-            models.Conto.user_id == current_user_id
+@router.post("", response_model=TransazioneOut)
+def create_transazione(
+    transazione: TransazioneCreate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # 1. Recuperiamo il conto (ci serve sia per la sicurezza che per il saldo)
+    conto = db.query(Conto).filter(
+        Conto.id == transazione.conto_id,
+        Conto.user_id == current_user_id
+    ).first()
+
+    if not conto:
+        raise HTTPException(status_code=404, detail="Conto non trovato o non autorizzato")
+
+    # 2. Se è un RIMBORSO, un controllo rapido di esistenza del padre
+    if transazione.tipo == TipoTransazione.RIMBORSO and transazione.parent_transaction_id:
+        parent_exists = db.query(Transazione).filter(
+            Transazione.id == transazione.parent_transaction_id,
+            Transazione.user_id == current_user_id
         ).first()
         
-        if not parent:
-            raise HTTPException(status_code=404, detail="Spesa originale non trovata")
+        if not parent_exists:
+            raise HTTPException(status_code=400, detail="La transazione originale non esiste")
 
-    # 2. Creazione (il model_dump include parent_transaction_id)
-    new_trans = models.Transazione(**transazione.model_dump())
+    # 3. Creazione record
+    new_trans = Transazione(**transazione.model_dump(), user_id=current_user_id)
     db.add(new_trans)
 
-    # 3. Gestione Saldo (Importante!)
-    conto = db.query(models.Conto).filter(models.Conto.id == transazione.conto_id).first()
-    
-    if transazione.tipo == TipoTransazione.USCITA:
-        conto.saldo -= transazione.importo
-    else:
-        # Se è ENTRATA o RIMBORSO, aggiungiamo al saldo
-        conto.saldo += transazione.importo
+    # 4. Aggiornamento Saldo
+    # Usiamo una logica compatta: le uscite sottraggono, tutto il resto somma
+    modificatore = -1 if transazione.tipo == TipoTransazione.USCITA else 1
+    conto.saldo += (transazione.importo * modificatore)
 
     db.commit()
     db.refresh(new_trans)
     return new_trans
 
-@router.get("/paginated", response_model=schemas.TransazionePagination)
+@router.get("/paginated", response_model=TransazionePagination)
 def get_transazioni(
     page: int = 1,
     size: int = 10,
@@ -55,16 +62,23 @@ def get_transazioni(
     offset = (page - 1) * size
     
     # Query di base
-    query = db.query(models.Transazione).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id
+    query = db.query(Transazione).filter(
+        Transazione.user_id == current_user_id
     )
     
     # Conteggio totale per la paginazione nel frontend
     total = query.count()
     
     # Recupero dati della pagina specifica
-    data = query.order_by(models.Transazione.data.desc()).offset(offset).limit(size).all()
-    
+    data = query.order_by(
+            Transazione.data.desc(),
+            Transazione.creationDate.desc(),
+            Transazione.lastUpdate.desc(),
+            Transazione.id.desc())\
+        .offset(offset)\
+        .limit(size)\
+        .all()
+
     return {
         "total": total,
         "page": page,
@@ -72,80 +86,117 @@ def get_transazioni(
         "data": data
     }
 
-@router.get("", response_model=list[schemas.TransazioneOut])
+@router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     n: int,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Recupera solo gli ultimi n record in ordine cronologico decrescente
-    return db.query(models.Transazione).join(models.Conto).filter(
-        models.Conto.user_id == current_user_id
-    ).order_by(models.Transazione.data.desc()).limit(n).all()
+    # Recupera gli ultimi n record
+    return db.query(Transazione)\
+        .filter(Transazione.user_id == current_user_id)\
+        .order_by(
+            Transazione.data.desc(),           
+            Transazione.creationDate.desc(),
+            Transazione.lastUpdate.desc(),
+            Transazione.id.desc()
+        )\
+        .limit(n)\
+        .all()
 
-@router.put("/{transazione_id}", response_model=schemas.TransazioneOut)
+@router.put("/{transazione_id}", response_model=TransazioneOut)
 def update_transazione(
     transazione_id: int, 
-    trans_data: schemas.TransazioneCreate, 
+    transazione_data: TransazioneUpdate, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_trans = db.query(models.Transazione).join(models.Conto).filter(
-        models.Transazione.id == transazione_id, 
-        models.Conto.user_id == current_user_id
+    # 1. Recuperiamo la transazione esistente
+    db_trans = db.query(Transazione).filter(
+        Transazione.id == transazione_id, 
+        Transazione.user_id == current_user_id
     ).first()
 
     if not db_trans:
         raise HTTPException(status_code=404, detail="Transazione non trovata")
 
-    # 1. Storna il vecchio importo dal vecchio conto
-    old_conto = db_trans.conto
-    if db_trans.tipo.upper() == "ENTRATA":
-        old_conto.saldo -= db_trans.importo
-    else:
-        old_conto.saldo += db_trans.importo
+    # 2. Recuperiamo il conto associato
+    conto = db.query(Conto).filter(
+        Conto.id == db_trans.conto_id, # Usiamo l'ID già presente nel DB
+        Conto.user_id == current_user_id
+    ).first()
 
-    # 2. Aggiorna i dati della transazione
-    for key, value in trans_data.model_dump().items():
-        setattr(db_trans, key, value)
-    
-    # 3. Applica il nuovo importo al (potenzialmente nuovo) conto
-    new_conto = db.query(models.Conto).filter(models.Conto.id == db_trans.conto_id).first()
-    if db_trans.tipo.upper() == "ENTRATA":
-        new_conto.saldo += db_trans.importo
+    # A. STORNO: Riportiamo il saldo a come era PRIMA della transazione originale
+    # Se era un'uscita, restituiamo i soldi al conto. Se era un'entrata/rimborso, li togliamo.
+    if db_trans.tipo == TipoTransazione.USCITA:
+        conto.saldo += db_trans.importo
     else:
-        new_conto.saldo -= db_trans.importo
+        conto.saldo -= db_trans.importo
+
+    # B. AGGIORNAMENTO DATI: Ora modifichiamo l'oggetto con i nuovi valori
+    update_data = transazione_data.model_dump(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_trans, key, value)
+
+    # C. APPLICAZIONE NUOVO IMPORTO: Calcoliamo il saldo con i nuovi dati
+    if db_trans.tipo == TipoTransazione.USCITA:
+        conto.saldo -= db_trans.importo
+    else:
+        conto.saldo += db_trans.importo
+
+    # ---------------------------------------------
 
     db.commit()
     db.refresh(db_trans)
     return db_trans
 
 @router.delete("/{transazione_id}")
-def delete_transazione(transazione_id: int, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    db_trans = db.query(models.Transazione).join(models.Conto).filter(
-        models.Transazione.id == transazione_id, models.Conto.user_id == current_user_id
+def delete_transazione(
+    transazione_id: int, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # 1. Recuperiamo la transazione (usando lo user_id diretto per sicurezza)
+    db_trans = db.query(Transazione).filter(
+        Transazione.id == transazione_id, 
+        Transazione.user_id == current_user_id
     ).first()
 
     if not db_trans:
         raise HTTPException(status_code=404, detail="Transazione non trovata")
 
-    # Reversione saldo
-    if db_trans.tipo.upper() == "ENTRATA":
-        db_trans.conto.saldo -= db_trans.importo
-    else:
-        db_trans.conto.saldo += db_trans.importo
+    # 2. Recuperiamo il conto associato per aggiornare il saldo
+    conto = db.query(Conto).filter(
+        Conto.id == db_trans.conto_id,
+        Conto.user_id == current_user_id
+    ).first()
 
+    if not conto:
+        raise HTTPException(status_code=404, detail="Conto associato non trovato")
+
+    # 3. Reversione saldo: dobbiamo annullare l'effetto della transazione
+    if db_trans.tipo.upper() == "USCITA":
+        conto.saldo += db_trans.importo
+    else:
+        conto.saldo -= db_trans.importo
+
+    # 4. Cancellazione e commit
     db.delete(db_trans)
     db.commit()
-    return {"message": "Eliminata"}
 
-@router.get("/tag/{tag_id}")
+    return {"message": "Transazione eliminata correttamente e saldo aggiornato"}
+
+@router.get("/tag/{tag_id}", response_model=list[TransazioneOut])
 def get_transazioni_by_tag(
     tag_id: int, 
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    return db.query(models.Transazione).join(models.Transazione.tags).filter(
-        models.Tag.id == tag_id,
-        models.Tag.user_id == current_user_id
-    ).all()
+    # Recuperiamo le transazioni filtrando direttamente per tag_id e user_id
+    # Non serve la JOIN se vogliamo solo le transazioni di quel tag
+    transazioni = db.query(Transazione).filter(
+        Transazione.tag_id == tag_id,
+        Transazione.user_id == current_user_id
+    ).order_by(Transazione.data.desc()).all()
+
+    return transazioni

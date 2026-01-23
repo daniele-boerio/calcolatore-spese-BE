@@ -14,7 +14,7 @@ class TransazioneBase(BaseModel):
     importo: float
     # Usiamo l'Enum qui per la validazione automatica
     tipo: TipoTransazione 
-    data: Optional[datetime] = None
+    data: datetime = None
     descrizione: Optional[str] = None
     conto_id: int
     categoria_id: Optional[int] = None
@@ -26,14 +26,15 @@ class TransazioneBase(BaseModel):
 class TransazioneCreate(TransazioneBase):
     pass
 
+class TransazioneUpdate(TransazioneBase):
+    pass
+
 # 3. Out: Eredita dalla Base e aggiunge i campi specifici per la risposta API
 class TransazioneOut(TransazioneBase):
     id: int
-    # Sovrascriviamo 'tag' per mostrare l'oggetto TagOut completo invece del solo ID
-    tag: Optional[TagOut] = None
-    # Rendiamo 'data' obbligatoria nell'output (perché nel DB ci sarà sempre)
-    data: datetime 
-
+    creationDate: datetime
+    lastUpdate: datetime
+    
     class Config:
         from_attributes = True
 

@@ -1,3 +1,4 @@
+import datetime
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -28,6 +29,9 @@ class ContoUpdate(BaseModel):
 
 class ContoOut(ContoBase):
     id: int
+
+    creationDate: datetime
+    lastUpdate: datetime
     user_id: int
 
     class Config:

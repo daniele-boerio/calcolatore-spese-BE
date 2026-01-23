@@ -1,11 +1,14 @@
+import datetime
+from enum import Enum
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional
+from schemas.transazione import TipoTransazione
 
 class RicorrenzaBase(BaseModel):
     nome: str
     importo: float
-    tipo: str  # "ENTRATA" o "USCITA"
+    tipo: TipoTransazione  # "ENTRATA", "USCITA" o "RIMBORSO"
     frequenza: str  # "GIORNALIERA", "SETTIMANALE", "MENSILE", "ANNUALE"
     prossima_esecuzione: date
     conto_id: int
@@ -27,6 +30,8 @@ class RicorrenzaUpdate(BaseModel):
 
 class RicorrenzaOut(RicorrenzaBase):
     id: int
+    creationDate: datetime
+    lastUpdate: datetime
     attiva: bool
     user_id: int
 

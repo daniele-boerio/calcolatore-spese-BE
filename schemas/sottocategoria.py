@@ -1,3 +1,4 @@
+import datetime
 from pydantic import BaseModel
 
 class SottocategoriaBase(BaseModel):
@@ -9,8 +10,10 @@ class SottocategoriaCreate(SottocategoriaBase):
 class SottocategoriaUpdate(SottocategoriaBase):
     pass
 
-class SottocategoriaOut(SottocategoriaBase): # Eredita 'nome' da SottocategoriaBase
+class SottocategoriaOut(SottocategoriaBase):
     id: int
+    creationDate: datetime
+    lastUpdate: datetime
     categoria_id: int
     class Config:
         from_attributes = True

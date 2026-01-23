@@ -1,3 +1,4 @@
+import datetime
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -37,6 +38,8 @@ class StoricoInvestimentoCreate(StoricoInvestimentoBase):
 
 class StoricoInvestimentoOut(StoricoInvestimentoBase):
     id: int
-
+    creationDate: datetime
+    lastUpdate: datetime
+    
     class Config:
         from_attributes = True
