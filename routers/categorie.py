@@ -18,7 +18,11 @@ def create_categoria(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    sottocategorie = [Sottocategoria(nome=s.nome) for s in (categoria.sottocategorie or [])]
+    # Assegniamo l'user_id esplicitamente a ogni sottocategoria durante la creazione
+    sottocategorie = [
+        Sottocategoria(nome=s.nome, user_id=current_user_id) 
+        for s in (categoria.sottocategorie or [])
+    ]
     
     nuova_categoria = Categoria(
         nome=categoria.nome, 
