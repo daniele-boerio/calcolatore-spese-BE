@@ -43,7 +43,7 @@ def get_categorie(
     # Recupera le categorie e le loro sottocategorie associate
     return db.query(Categoria).filter(
         Categoria.user_id == current_user_id
-    ).order_by(Categoria.id).all()
+    ).all()
 
 @router.put("/{categoria_id}", response_model=CategoriaOut)
 def update_categoria(

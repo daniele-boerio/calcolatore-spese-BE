@@ -69,12 +69,7 @@ def get_transazioni(
     total = query.count()
     
     # Recupero dati della pagina specifica
-    data = query.order_by(
-            Transazione.data.desc(),
-            Transazione.creationDate.desc(),
-            Transazione.lastUpdate.desc(),
-            Transazione.id.desc())\
-        .offset(offset)\
+    data = query.offset(offset)\
         .limit(size)\
         .all()
 
@@ -94,12 +89,6 @@ def get_recent_transazioni(
     # Recupera gli ultimi n record
     return db.query(Transazione)\
         .filter(Transazione.user_id == current_user_id)\
-        .order_by(
-            Transazione.data.desc(),           
-            Transazione.creationDate.desc(),
-            Transazione.lastUpdate.desc(),
-            Transazione.id.desc()
-        )\
         .limit(n)\
         .all()
 
@@ -196,6 +185,6 @@ def get_transazioni_by_tag(
     transazioni = db.query(Transazione).filter(
         Transazione.tag_id == tag_id,
         Transazione.user_id == current_user_id
-    ).order_by(Transazione.data.desc()).all()
+    ).all()
 
     return transazioni

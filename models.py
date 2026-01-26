@@ -12,8 +12,8 @@ class User(Base):
     hashed_password = Column(String, nullable=False)
     total_budget = Column(Float, nullable=True) # Per la BudgetCard
 
-    conti = relationship("Conto", cascade="all, delete-orphan")
-    investimenti = relationship("Investimento", cascade="all, delete-orphan")
+    conti = relationship("Conto", cascade="all, delete-orphan", order_by="desc(Conto.creationDate), desc(Conto.lastUpdate), Conto.id")
+    investimenti = relationship("Investimento", cascade="all, delete-orphan", order_by="desc(Investimento.creationDate), desc(Investimento.lastUpdate), Investimento.id")
     
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -38,7 +38,7 @@ class Conto(Base):
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
-    transazioni = relationship("Transazione", cascade="all, delete-orphan")
+    transazioni = relationship("Transazione", cascade="all, delete-orphan", order_by="desc(Transazione.data), desc(Transazione.creationDate), desc(Transazione.lastUpdate), Transazione.id")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -55,7 +55,7 @@ class Categoria(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
     # Una categoria ha più sottocategorie
-    sottocategorie = relationship("Sottocategoria", cascade="all, delete-orphan")
+    sottocategorie = relationship("Sottocategoria", cascade="all, delete-orphan", order_by="Sottocategoria.creationDate, Sottocategoria.lastUpdate, Sottocategoria.id")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -88,7 +88,7 @@ class Tag(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     
     # Si riferisce a diverse transazioni
-    transazioni = relationship("Transazione")
+    transazioni = relationship("Transazione", order_by="desc(Transazione.data), desc(Transazione.creationDate), desc(Transazione.lastUpdate), Transazione.id")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -119,8 +119,8 @@ class Transazione(Base):
     )
 
     # Relazioni
-    categoria = relationship("Categoria")
-    sottocategoria = relationship("Sottocategoria")
+    categoria = relationship("Categoria", order_by="desc(Categoria.creationDate), desc(Categoria.lastUpdate), Categoria.id")
+    sottocategoria = relationship("Sottocategoria", order_by="desc(Sottocategoria.creationDate), desc(Sottocategoria.lastUpdate), Sottocategoria.id")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -140,8 +140,8 @@ class Investimento(Base):
     # Questi campi vengono SOVRASCRITTI ogni notte, non creano nuovi record
     prezzo_attuale = Column(Float, nullable=True)
     data_ultimo_aggiornamento = Column(Date, nullable=True)
-    
-    storico = relationship("StoricoInvestimento", cascade="all, delete-orphan")
+
+    storico = relationship("StoricoInvestimento", cascade="all, delete-orphan", order_by="desc(StoricoInvestimento.creationDate), desc(StoricoInvestimento.lastUpdate), StoricoInvestimento.id")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
