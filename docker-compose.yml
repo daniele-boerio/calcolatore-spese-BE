@@ -1,24 +1,24 @@
 services:
   db:
-    image: "postgres:15"
+    image: 'postgres:15'
     restart: always
     environment:
-      POSTGRES_USER: "${DB_USER}"
-      POSTGRES_PASSWORD: "${DB_PASSWORD}"
-      POSTGRES_DB: "${DB_NAME}"
+      POSTGRES_USER: '${DB_USER}'
+      POSTGRES_PASSWORD: '${DB_PASSWORD}'
+      POSTGRES_DB: '${DB_NAME}'
     volumes:
-      - "postgres_data:/var/lib/postgresql/data"
-    # La porta 5432 è rimossa per sicurezza, il backend la vede comunque
+      - 'postgres_data:/var/lib/postgresql/data'
 
   backend:
     build: .
     restart: always
     depends_on:
       - db
+    # Configurazione Health Check per confermare che il server è pronto
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s
       timeout: 10s
       retries: 5
-    # Le variabili d'ambiente vengono iniettate automaticamente da Coolify
+    # Comando ottimizzato per proxy, migrazioni e documentazione relativa
     command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=* --root-path /"
