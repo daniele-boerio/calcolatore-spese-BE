@@ -6,7 +6,6 @@ from routers import conti, categorie, transazioni, investimenti, user, sottocate
 
 app = FastAPI(
     title="Calcolatore Spese API",
-    # Questo risolve il "No available server" usando l'URL corrente
     servers=[{"url": "/", "description": "Default"}] 
 )
 
