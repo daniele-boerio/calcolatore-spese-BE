@@ -3,11 +3,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
 from services import task_aggiornamento_prezzi, task_transazioni_ricorrenti, task_ricarica_automatica_conti
 from routers import conti, categorie, transazioni, investimenti, user, sottocategorie, tag, ricorrenze
-from starlette.middleware.proxy_headers import ProxyHeadersMiddleware
 
-app = FastAPI(title="Calcolatore Spese API")
-
-app.add_middleware(ProxyHeadersMiddleware, trusted_hosts=["*"])
+app = FastAPI(
+    title="Calcolatore Spese API",
+    # Questo risolve il "No available server" usando l'URL corrente
+    servers=[{"url": "/", "description": "Default"}] 
+)
 
 # Middleware CORS (rimane qui)
 app.add_middleware(
@@ -39,8 +40,8 @@ def start_scheduler():
     scheduler.start()
 
 @app.get("/")
-def read_root():
-    return {"message": "Backend attivo e modulare!"}
+async def root():
+    return {"status": "online", "message": "Backend SpassoConti attivo"}
 
 
 if __name__ == "__main__":
