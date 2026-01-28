@@ -1,13 +1,13 @@
 services:
   db:
-    image: 'postgres:15'
+    image: "postgres:15"
     restart: always
     environment:
-      POSTGRES_USER: '${DB_USER}'
-      POSTGRES_PASSWORD: '${DB_PASSWORD}'
-      POSTGRES_DB: '${DB_NAME}'
+      POSTGRES_USER: "${DB_USER}"
+      POSTGRES_PASSWORD: "${DB_PASSWORD}"
+      POSTGRES_DB: "${DB_NAME}"
     volumes:
-      - 'postgres_data:/var/lib/postgresql/data'
+      - "postgres_data:/var/lib/postgresql/data"
 
   backend:
     build: .
@@ -16,9 +16,11 @@ services:
       - db
     # Configurazione Health Check per confermare che il server è pronto
     healthcheck:
+      # Il comando verifica che la rotta root (/) risponda con successo
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
-      interval: 30s
-      timeout: 10s
-      retries: 5
-    # Comando ottimizzato per proxy, migrazioni e documentazione relativa
+      interval: 30s # Ogni quanto eseguire il test
+      timeout: 10s # Tempo massimo di attesa risposta
+      retries: 3 # Quanti fallimenti prima di segnarlo come "unhealthy"
+      start_period: 20s # Tempo concesso all'app (e alembic) per avviarsi
+      # Comando ottimizzato per proxy, migrazioni e documentazione relativa
     command: sh -c "alembic upgrade head && uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips=* --root-path /"
