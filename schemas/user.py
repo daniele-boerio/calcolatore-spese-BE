@@ -26,3 +26,10 @@ class LoginRequest(BaseModel):
 
 class UserBudgetUpdate(BaseModel):
     totalBudget: Optional[float] = None
+
+class UserResponse(BaseModel):
+    username: str
+    email: str
+
+    class Config:
+        from_attributes = True

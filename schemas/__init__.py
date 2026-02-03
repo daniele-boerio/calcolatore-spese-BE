@@ -1,4 +1,4 @@
-from .user import UserBase, UserCreate, UserOut, Token, LoginRequest, UserBudgetUpdate
+from .user import UserBase, UserCreate, UserOut, Token, LoginRequest, UserBudgetUpdate, UserResponse
 from .conto import ContoBase, ContoCreate, ContoUpdate, ContoOut
 from .categoria import CategoriaBase, CategoriaCreate, CategoriaUpdate, CategoriaOut
 from .sottocategoria import SottocategoriaBase, SottocategoriaCreate, SottocategoriaUpdate, SottocategoriaOut

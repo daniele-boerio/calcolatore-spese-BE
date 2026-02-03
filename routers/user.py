@@ -5,7 +5,7 @@ from routers.conti import get_current_month_expenses
 import auth
 from fastapi.security import OAuth2PasswordRequestForm
 from models import User
-from schemas import Token, UserCreate, UserBudgetUpdate
+from schemas import Token, UserCreate, UserBudgetUpdate, UserResponse
 
 router = APIRouter(
     tags=["User"]        # Raggruppa questi endpoint nella documentazione Swagger
@@ -15,18 +15,22 @@ router = APIRouter(
 
 @router.post("/register", response_model=Token)
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    # 1. Controllo duplicati
-    if db.query(User).filter(User.email == user.email).first():
+    # Normalizziamo input in lowercase
+    email_lower = user.email.lower()
+    username_lower = user.username.lower()
+
+    # 1. Controllo duplicati usando i valori normalizzati
+    if db.query(User).filter(User.email == email_lower).first():
         raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
     
-    if db.query(User).filter(User.username == user.username).first():
+    if db.query(User).filter(User.username == username_lower).first():
         raise HTTPException(status_code=400, detail="Lo username scelto non è disponibile.")
     
-    # 2. Hash della password e creazione utente
+    # 2. Hash della password e creazione utente con dati lowercase
     hashed_pwd = auth.get_password_hash(user.password)
     new_user = User(
-        email=user.email, 
-        username=user.username, 
+        email=email_lower, 
+        username=username_lower, 
         hashed_password=hashed_pwd,
     )
     
@@ -34,18 +38,19 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
     db.commit()
     db.refresh(new_user)
     
-    # 3. Generazione Token per login automatico
     access_token = auth.create_access_token(data={"user_id": new_user.id})
     
     return {
         "access_token": access_token,
-        "username": new_user.username
+        "username": new_user.username # Restituisce il valore lowercase salvato
     }
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # Cerchiamo l'utente direttamente tramite lo username
-    user = db.query(User).filter(User.username == form_data.username).first()
+    # Trasformiamo lo username in lowercase per il confronto nel DB
+    username_lower = form_data.username.lower()
+    
+    user = db.query(User).filter(User.username == username_lower).first()
     
     if not user:
         raise HTTPException(
@@ -65,6 +70,15 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
         "access_token": access_token,
         "username": user.username
     }
+
+@router.get("/me", response_model=UserResponse)
+def get_me(current_user: User = Depends(auth.get_current_user)):
+    """
+    Verifica la validità del token e restituisce i dati dell'utente loggato.
+    Se il token è invalido o scaduto, 'get_current_user' solleverà 
+    automaticamente un'eccezione 401.
+    """
+    return current_user
 
 @router.put("/monthlyBudget")
 def update_monthly_budget(
