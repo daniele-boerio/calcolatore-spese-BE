@@ -6,7 +6,7 @@ from datetime import date
 # --- SCHEMI INVESTIMENTO (Il Titolo) ---
 
 class InvestimentoBase(BaseModel):
-    isin: str
+    isin: Optional[str] = None
     ticker: Optional[str] = None
     nome_titolo: str
     
@@ -15,7 +15,6 @@ class InvestimentoCreate(InvestimentoBase):
 
 class InvestimentoOut(InvestimentoBase):
     id: int
-    user_id: int
     # Includiamo i prezzi calcolati dal BE per la UI
     prezzo_attuale: Optional[float] = None
     data_ultimo_aggiornamento: Optional[date] = None

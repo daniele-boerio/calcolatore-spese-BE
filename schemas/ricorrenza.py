@@ -34,7 +34,6 @@ class RicorrenzaOut(RicorrenzaBase):
     creationDate: datetime
     lastUpdate: datetime
     attiva: bool
-    user_id: int
 
     class Config:
         from_attributes = True

@@ -31,7 +31,6 @@ class ContoOut(ContoBase):
 
     creationDate: datetime
     lastUpdate: datetime
-    user_id: int
 
     class Config:
         from_attributes = True
