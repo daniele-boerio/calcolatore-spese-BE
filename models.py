@@ -129,6 +129,11 @@ class Transazione(Base):
         onupdate=lambda: datetime.now(timezone.utc)
     )
 
+from sqlalchemy import Column, Integer, String, Float, ForeignKey, DateTime, Date, desc
+from sqlalchemy.orm import relationship
+from datetime import datetime, timezone
+from database import Base
+
 class Investimento(Base):
     __tablename__ = "investimenti"
     id = Column(Integer, primary_key=True, index=True)
@@ -137,34 +142,45 @@ class Investimento(Base):
     nome_titolo = Column(String)
     user_id = Column(Integer, ForeignKey("users.id"))
     
-    # Questi campi vengono SOVRASCRITTI ogni notte, non creano nuovi record
     prezzo_attuale = Column(Float, nullable=True)
     data_ultimo_aggiornamento = Column(Date, nullable=True)
 
-    storico = relationship("StoricoInvestimento", cascade="all, delete-orphan", order_by="desc(StoricoInvestimento.creationDate), desc(StoricoInvestimento.lastUpdate), StoricoInvestimento.id")
+    # Ordinamento cronologico per calcoli, ma visualizzazione desc per la lista
+    storico = relationship("StoricoInvestimento", cascade="all, delete-orphan", order_by="StoricoInvestimento.data")
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    lastUpdate = Column(
-        DateTime, 
-        default=lambda: datetime.now(timezone.utc), 
-        onupdate=lambda: datetime.now(timezone.utc)
-    )
+    lastUpdate = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+
+    # --- PROPRIETÀ CALCOLATE ---
+    @property
+    def quantita_totale(self):
+        return sum(s.quantita for s in self.storico)
+
+    @property
+    def prezzo_medio_carico(self):
+        # Il PMC si calcola solo sugli acquisti (quantità > 0)
+        acquisti = [s for s in self.storico if s.quantita > 0]
+        if not acquisti: return 0
+        totale_speso = sum(s.quantita * s.prezzo_unitario for s in acquisti)
+        totale_quantita = sum(s.quantita for s in acquisti)
+        return totale_speso / totale_quantita if totale_quantita > 0 else 0
+
+    @property
+    def valore_posizione(self):
+        if not self.prezzo_attuale: return 0
+        return self.quantita_totale * self.prezzo_attuale
 
 class StoricoInvestimento(Base):
     __tablename__ = "storico_investimenti"
     id = Column(Integer, primary_key=True, index=True)
     investimento_id = Column(Integer, ForeignKey("investimenti.id", ondelete="CASCADE"))
     data = Column(Date, nullable=False)
-    quantita = Column(Float) # Positiva per acquisto, negativa per vendita
+    quantita = Column(Float) 
     prezzo_unitario = Column(Float)
-    valore_attuale = Column(Float) # Per tracciare l'andamento nel tempo
+    valore_attuale = Column(Float) # Controvalore al momento dell'operazione
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    lastUpdate = Column(
-        DateTime, 
-        default=lambda: datetime.now(timezone.utc), 
-        onupdate=lambda: datetime.now(timezone.utc)
-    )
+    lastUpdate = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
 
 class Ricorrenza(Base):
     __tablename__ = "ricorrenze"

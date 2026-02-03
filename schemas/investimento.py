@@ -1,21 +1,28 @@
-from datetime import datetime
+from datetime import datetime, date
 from pydantic import BaseModel
 from typing import Optional
-from datetime import date
 
-# --- SCHEMI INVESTIMENTO (Il Titolo) ---
+# --- SCHEMI INVESTIMENTO (Anagrafica Titolo) ---
 
 class InvestimentoBase(BaseModel):
-    isin: Optional[str] = None
+    isin: str
     ticker: Optional[str] = None
     nome_titolo: str
-    
+
 class InvestimentoCreate(InvestimentoBase):
-    pass
+    # Dati per la prima operazione automatica
+    quantita_iniziale: float
+    prezzo_carico_iniziale: float
+    data_iniziale: date
+
+class InvestimentoUpdate(BaseModel):
+    # Tutti i campi opzionali per la PATCH
+    isin: Optional[str] = None
+    ticker: Optional[str] = None
+    nome_titolo: Optional[str] = None
 
 class InvestimentoOut(InvestimentoBase):
     id: int
-    # Includiamo i prezzi calcolati dal BE per la UI
     prezzo_attuale: Optional[float] = None
     data_ultimo_aggiornamento: Optional[date] = None
 
@@ -23,22 +30,24 @@ class InvestimentoOut(InvestimentoBase):
         from_attributes = True
 
 
-# --- SCHEMI STORICO (Le Operazioni) ---
+# --- SCHEMI STORICO (Operazioni di Acquisto/Vendita) ---
 
 class StoricoInvestimentoBase(BaseModel):
-    investimento_id: int
     data: date
     quantita: float  # Positiva per acquisto, negativa per vendita
     prezzo_unitario: float
-    valore_attuale: Optional[float] = None
 
 class StoricoInvestimentoCreate(StoricoInvestimentoBase):
-    pass
+    investimento_id: int
+
+class StoricoInvestimentoUpdate(BaseModel):
+    data: Optional[date] = None
+    quantita: Optional[float] = None
+    prezzo_unitario: Optional[float] = None
 
 class StoricoInvestimentoOut(StoricoInvestimentoBase):
     id: int
-    creationDate: datetime
-    lastUpdate: datetime
+    investimento_id: int
     
     class Config:
         from_attributes = True

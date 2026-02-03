@@ -4,5 +4,5 @@ from .categoria import CategoriaBase, CategoriaCreate, CategoriaUpdate, Categori
 from .sottocategoria import SottocategoriaBase, SottocategoriaCreate, SottocategoriaUpdate, SottocategoriaOut
 from .tag import TagBase, TagCreate, TagUpdate, TagOut
 from .transazione import TransazioneBase, TransazioneCreate, TransazioneUpdate, TransazioneOut, TransazionePagination
-from .investimento import InvestimentoBase, InvestimentoCreate, InvestimentoOut, StoricoInvestimentoBase, StoricoInvestimentoCreate, StoricoInvestimentoOut
+from .investimento import InvestimentoCreate, InvestimentoUpdate, InvestimentoOut, StoricoInvestimentoCreate, StoricoInvestimentoUpdate, StoricoInvestimentoOut
 from .ricorrenza import RicorrenzaBase, RicorrenzaCreate, RicorrenzaUpdate, RicorrenzaOut

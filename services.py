@@ -10,12 +10,12 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 def get_live_price(ticker_symbol: str, isin_code: str):
+    # La logica rimane valida: yfinance preferisce il Ticker, ma l'ISIN è più preciso per i titoli europei
     search_term = ticker_symbol if ticker_symbol else isin_code
     if not search_term:
         return None
     
     try:
-        # Usiamo un timeout per evitare che yfinance rimanga appeso troppo a lungo
         ticker = yf.Ticker(search_term)
         data = ticker.history(period="1d")
         
@@ -38,30 +38,40 @@ def get_live_price(ticker_symbol: str, isin_code: str):
         return None
     
 def task_aggiornamento_prezzi():
-    logger.info("Avvio task aggiornamento prezzi...")
+    """
+    Questo task aggiorna solo il campo 'prezzo_attuale' nell'anagrafica Investimento.
+    I calcoli di profitto e valore totale verranno fatti al volo dalle @property del modello.
+    """
+    logger.info("Avvio task aggiornamento prezzi investimenti...")
     db = SessionLocal()
     try:
+        # Recuperiamo solo i titoli che hanno un ticker o un ISIN
         investimenti = db.query(models.Investimento).all()
+        
         for inv in investimenti:
             try:
                 prezzo_live = get_live_price(inv.ticker, inv.isin)
+                
                 if prezzo_live:
                     inv.prezzo_attuale = prezzo_live
                     inv.data_ultimo_aggiornamento = date.today()
-                    logger.info(f"Aggiornato {inv.nome_titolo or inv.ticker}: {prezzo_live}")
+                    
+                    # OPZIONALE: Se vuoi loggare il profitto attuale usando la @property:
+                    logger.info(f"{inv.nome_titolo}: Prezzo {prezzo_live} - P&L: {inv.valore_posizione - (inv.quantita_totale * inv.prezzo_medio_carico)}")
+                    
+                    logger.info(f"Aggiornato {inv.nome_titolo or inv.isin}: {prezzo_live}")
                 else:
-                    logger.warning(f"Impossibile aggiornare {inv.nome_titolo or inv.ticker}")
+                    logger.warning(f"Impossibile trovare prezzo live per {inv.nome_titolo or inv.isin}")
+            
             except Exception as e:
-                # Questo try/except interno evita che il fallimento di UN titolo 
-                # blocchi il ciclo for per gli altri titoli
-                logger.error(f"Errore durante l'aggiornamento di {inv.id}: {e}")
+                logger.error(f"Errore durante l'aggiornamento del titolo {inv.id}: {e}")
                 continue 
 
         db.commit()
-        logger.info("Task completato con successo.")
+        logger.info("Task aggiornamento prezzi completato.")
     except Exception as e:
-        db.rollback() # Se succede qualcosa di grave al DB, annulla le modifiche
-        logger.error(f"Errore fatale nel task: {e}")
+        db.rollback()
+        logger.error(f"Errore fatale nel task investimenti: {e}")
     finally:
         db.close()
 
