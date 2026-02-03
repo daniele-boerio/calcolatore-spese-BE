@@ -2,3 +2,10 @@
 - git pull
 - docker compose up -d --build per re-buildare il servizio
 - docker logs -f spese-backend-api per visionare i log del servizio
+
+per fare la una nuova revisione dopo aver modificato i modelli:
+
+- apri cmd
+- ssh -L 5433:localhost:5432 tuo_utente_coolify@ip_del_server -p ssh_port
+- impostare la porta 5433 in .env
+- su vs-code runnare alembic revision --autogenerate -m "testo"
