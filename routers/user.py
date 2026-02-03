@@ -72,13 +72,20 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     }
 
 @router.get("/me", response_model=UserResponse)
-def get_me(current_user: User = Depends(auth.get_current_user)):
-    """
-    Verifica la validità del token e restituisce i dati dell'utente loggato.
-    Se il token è invalido o scaduto, 'get_current_user' solleverà 
-    automaticamente un'eccezione 401.
-    """
-    return current_user
+def get_me(
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # Cerchiamo l'utente nel DB partendo dall'ID estratto dal token
+    user = db.query(User).filter(User.id == current_user_id).first()
+    
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Utente non trovato"
+        )
+    
+    return user
 
 @router.put("/monthlyBudget")
 def update_monthly_budget(
