@@ -84,14 +84,30 @@ def delete_investimento(id: int, db: Session = Depends(get_db), current_user_id:
 # --- OPERAZIONI (STORICO) ---
 
 # 6. POST - Aggiunta operazione (Acquisto/Vendita)
-@router.post("/operazione", response_model=StoricoInvestimentoOut)
-def add_operazione(payload: StoricoInvestimentoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    # Verifica che l'investimento appartenga all'utente
-    invest = db.query(Investimento).filter(Investimento.id == payload.investimento_id, Investimento.user_id == current_user_id).first()
+@router.post("/{id}/operazione", response_model=StoricoInvestimentoOut)
+def add_operazione(
+    id: int, 
+    payload: StoricoInvestimentoCreate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
+    # 1. Verifica che l'investimento appartenga all'utente
+    invest = db.query(Investimento).filter(
+        Investimento.id == id, 
+        Investimento.user_id == current_user_id
+    ).first()
+    
     if not invest:
         raise HTTPException(status_code=404, detail="Investimento non trovato")
 
-    new_op = StoricoInvestimento(**payload.model_dump())
+    # 2. Crea l'operazione associando l'ID dell'URL
+    # Calcoliamo anche il valore_attuale se non passato dal FE
+    new_op = StoricoInvestimento(
+        **payload.model_dump(),
+        investimento_id=id,  # Preso dall'URL
+        valore_attuale=payload.quantita * payload.prezzo_unitario
+    )
+    
     db.add(new_op)
     db.commit()
     db.refresh(new_op)

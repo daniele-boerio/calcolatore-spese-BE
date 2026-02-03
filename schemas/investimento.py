@@ -1,6 +1,6 @@
-from datetime import datetime, date
+from datetime import date
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 
 # --- SCHEMI INVESTIMENTO (Anagrafica Titolo) ---
 
@@ -26,6 +26,8 @@ class InvestimentoOut(InvestimentoBase):
     prezzo_attuale: Optional[float] = None
     data_ultimo_aggiornamento: Optional[date] = None
 
+    storico: List[StoricoInvestimentoOut] = []
+
     class Config:
         from_attributes = True
 
@@ -38,7 +40,7 @@ class StoricoInvestimentoBase(BaseModel):
     prezzo_unitario: float
 
 class StoricoInvestimentoCreate(StoricoInvestimentoBase):
-    investimento_id: int
+    pass
 
 class StoricoInvestimentoUpdate(BaseModel):
     data: Optional[date] = None
