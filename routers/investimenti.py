@@ -114,32 +114,51 @@ def add_operazione(
     return new_op
 
 # 7. PUT - Modifica un'operazione esistente
-@router.put("/operazione/{op_id}", response_model=StoricoInvestimentoOut)
-def update_operazione(op_id: int, payload: StoricoInvestimentoUpdate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+@router.put("/{id}/operazione/{op_id}", response_model=StoricoInvestimentoOut)
+def update_operazione(
+    id: int, 
+    op_id: int, 
+    payload: StoricoInvestimentoUpdate, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
     db_op = db.query(StoricoInvestimento).join(Investimento).filter(
-        StoricoInvestimento.id == op_id, 
+        StoricoInvestimento.id == op_id,
+        StoricoInvestimento.investimento_id == id,
         Investimento.user_id == current_user_id
     ).first()
+
     if not db_op:
-        raise HTTPException(status_code=404, detail="Operazione non trovata")
+        raise HTTPException(status_code=404, detail="Operazione non trovata per questo investimento")
 
     update_data = payload.model_dump(exclude_unset=True)
     for key, value in update_data.items():
         setattr(db_op, key, value)
+    
+    # Ricalcoliamo il valore attuale nel caso siano cambiati quantità o prezzo
+    db_op.valore_attuale = db_op.quantita * db_op.prezzo_unitario
     
     db.commit()
     db.refresh(db_op)
     return db_op
 
 # 8. DELETE - Elimina un'operazione
-@router.delete("/operazione/{op_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_operazione(op_id: int, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+@router.delete("/{id}/operazione/{op_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_operazione(
+    id: int, 
+    op_id: int, 
+    db: Session = Depends(get_db), 
+    current_user_id: int = Depends(auth.get_current_user_id)
+):
     db_op = db.query(StoricoInvestimento).join(Investimento).filter(
-        StoricoInvestimento.id == op_id, 
+        StoricoInvestimento.id == op_id,
+        StoricoInvestimento.investimento_id == id,
         Investimento.user_id == current_user_id
     ).first()
+
     if not db_op:
         raise HTTPException(status_code=404, detail="Operazione non trovata")
+        
     db.delete(db_op)
     db.commit()
     return None
