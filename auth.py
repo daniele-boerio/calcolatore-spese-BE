@@ -1,10 +1,10 @@
 from dotenv import load_dotenv
 import bcrypt
 import os
-from fastapi.security import OAuth2PasswordBearer
 from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 
 load_dotenv()
 
@@ -36,23 +36,33 @@ def create_access_token(data: dict):
     return encoded_jwt
 
 
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="auth/login")
+security = HTTPBearer()
 
 
-def get_current_user_id(token: str = Depends(oauth2_scheme)):
+def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)):
+    token = credentials.credentials  # Estrae automaticamente la stringa dopo 'Bearer '
+
     credentials_exception = HTTPException(
         status_code=status.HTTP_401_UNAUTHORIZED,
-        detail="Unable to validate credentials",
+        detail="Could not validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+
     try:
-        payload = jwt.decode(
-            token, os.getenv("SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")]
-        )
-        print(f"CONTENUTO PAYLOAD: {payload}")
+        secret = os.getenv("SECRET_KEY")
+        algo = os.getenv("ALGORITHM")
+
+        # Ora il print DEVE apparire perché HTTPBearer è meno restrittivo all'ingresso
+        payload = jwt.decode(token, secret, algorithms=[algo])
+        print(f"DEBUG - PAYLOAD DECODIFICATO: {payload}")
+
         user_id: int = payload.get("user_id")
         if user_id is None:
+            print("DEBUG - user_id non trovato nel payload")
             raise credentials_exception
+
         return user_id
-    except JWTError:
+
+    except JWTError as e:
+        print(f"DEBUG - Errore JWT: {str(e)}")
         raise credentials_exception
