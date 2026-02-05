@@ -9,19 +9,26 @@ from schemas import ContoCreate, ContoOut, ContoUpdate
 from schemas.transazione import TipoTransazione
 
 router = APIRouter(
-    prefix="/conti",      # Tutti gli endpoint in questo file inizieranno con /conti
-    tags=["Conti"]        # Raggruppa questi endpoint nella documentazione Swagger
+    prefix="/conti",
+    tags=["Conti"]
 )
 
 # --- ENDPOINT CONTI ---
 
 @router.post("", response_model=ContoOut)
 def create_conto(conto: ContoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    new_conto = Conto(**conto.model_dump(), user_id=current_user_id)
-    db.add(new_conto)
-    db.commit()
-    db.refresh(new_conto)
-    return new_conto
+    try:
+        new_conto = Conto(**conto.model_dump(), user_id=current_user_id)
+        db.add(new_conto)
+        db.commit()
+        db.refresh(new_conto)
+        return new_conto
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating the account"
+        )
 
 @router.get("", response_model=list[ContoOut])
 def get_conti(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
@@ -34,23 +41,31 @@ def update_conto(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Cerchiamo il conto verificando che appartenga all'utente
     db_conto = db.query(Conto).filter(
         Conto.id == conto_id, 
         Conto.user_id == current_user_id
     ).first()
 
     if not db_conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato o non autorizzato")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Account not found or unauthorized"
+        )
 
-    # Aggiorniamo solo i campi inviati (escludendo quelli None)
-    update_data = conto_data.model_dump(exclude_unset=True)
-    for key, value in update_data.items():
-        setattr(db_conto, key, value)
+    try:
+        update_data = conto_data.model_dump(exclude_unset=True)
+        for key, value in update_data.items():
+            setattr(db_conto, key, value)
 
-    db.commit()
-    db.refresh(db_conto)
-    return db_conto
+        db.commit()
+        db.refresh(db_conto)
+        return db_conto
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update account details"
+        )
 
 @router.delete("/{conto_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_conto(
@@ -64,11 +79,21 @@ def delete_conto(
     ).first()
 
     if not db_conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Account not found"
+        )
 
-    db.delete(db_conto)
-    db.commit()
-    return None
+    try:
+        db.delete(db_conto)
+        db.commit()
+        return None
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Cannot delete account. It may be linked to existing transactions"
+        )
 
 @router.get("/currentMonthExpenses")
 def get_current_month_expenses(
@@ -78,13 +103,15 @@ def get_current_month_expenses(
     user = db.query(User).filter(User.id == current_user_id).first()
 
     if not user:
-        raise HTTPException(status_code=404, detail="Utente non trovato")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="User session invalid or account not found"
+        )
     
-    # Calcolo dell'intervallo temporale (inizio mese corrente)
     today = datetime.now(timezone.utc)
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # 1. Calcoliamo il totale delle USCITE
+    # 1. Total OUTGOING
     total_out = db.query(func.sum(Transazione.importo))\
         .join(Conto)\
         .filter(
@@ -93,9 +120,7 @@ def get_current_month_expenses(
             Transazione.data >= first_day
         ).scalar() or 0.0
 
-    # 2. Calcoliamo il totale dei RIMBORSI
-    # Nota: qui non ci interessa a quale categoria appartengano, 
-    # perché il rimborso è un recupero di liquidità totale sul mese.
+    # 2. Total REFUNDS
     total_refunds = db.query(func.sum(Transazione.importo))\
         .join(Conto)\
         .filter(
@@ -104,10 +129,8 @@ def get_current_month_expenses(
             Transazione.data >= first_day
         ).scalar() or 0.0
 
-    # Spesa netta reale
     net_expenses = max(0, total_out - total_refunds)
 
-    # Calcolo percentuale rispetto al budget totale dell'utente
     percentage = None
     if user.total_budget and user.total_budget > 0:
         percentage = round((net_expenses / user.total_budget * 100), 1)
@@ -125,7 +148,7 @@ def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int
     today = datetime.now(timezone.utc)
     first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-    # Recuperiamo tutte le transazioni (Uscite e Rimborsi) del mese
+    # Fetch all transactions (Expenses and Refunds) for the month
     transazioni = db.query(Transazione).join(Conto).filter(
         Conto.user_id == current_user_id,
         or_(
@@ -138,17 +161,13 @@ def get_expenses_by_category(db: Session = Depends(get_db), current_user_id: int
     stats = {}
 
     for t in transazioni:
-        # Usiamo la categoria presente sulla transazione (sia essa uscita o rimborso)
-        cat_nome = t.categoria.nome if t.categoria else "Senza Categoria"
+        cat_nome = t.categoria.nome if t.categoria else "Uncategorized"
         
         if t.tipo == TipoTransazione.USCITA:
-            # Sommiamo l'uscita
             stats[cat_nome] = stats.get(cat_nome, 0.0) + t.importo
         else:
-            # Sotraiamo il rimborso (dato che ha la stessa categoria del padre)
             stats[cat_nome] = stats.get(cat_nome, 0.0) - t.importo
 
-    # Formattazione finale per il grafico (escludiamo categorie a zero o negative)
     return [
         {"label": cat, "value": round(val, 2)} 
         for cat, val in stats.items() if val > 0

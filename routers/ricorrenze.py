@@ -14,16 +14,30 @@ def create_ricorrenza(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Verifica che il conto appartenga all'utente
-    conto = db.query(Conto).filter(Conto.id == ricorrenza.conto_id, Conto.user_id == current_user_id).first()
+    # 1. Verify that the account belongs to the user
+    conto = db.query(Conto).filter(
+        Conto.id == ricorrenza.conto_id, 
+        Conto.user_id == current_user_id
+    ).first()
+    
     if not conto:
-        raise HTTPException(status_code=404, detail="Conto non trovato")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Account not found or unauthorized"
+        )
 
-    new_ric = Ricorrenza(**ricorrenza.model_dump(), user_id=current_user_id)
-    db.add(new_ric)
-    db.commit()
-    db.refresh(new_ric)
-    return new_ric
+    try:
+        new_ric = Ricorrenza(**ricorrenza.model_dump(), user_id=current_user_id)
+        db.add(new_ric)
+        db.commit()
+        db.refresh(new_ric)
+        return new_ric
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating the recurring transaction"
+        )
 
 @router.get("", response_model=List[RicorrenzaOut])
 def get_ricorrenze(
@@ -39,17 +53,31 @@ def update_ricorrenza(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_ric = db.query(Ricorrenza).filter(Ricorrenza.id == ricorrenza_id, Ricorrenza.user_id == current_user_id).first()
+    db_ric = db.query(Ricorrenza).filter(
+        Ricorrenza.id == ricorrenza_id, 
+        Ricorrenza.user_id == current_user_id
+    ).first()
+    
     if not db_ric:
-        raise HTTPException(status_code=404, detail="Ricorrenza non trovata")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Recurring transaction not found"
+        )
 
-    update_dict = ric_data.model_dump(exclude_unset=True)
-    for key, value in update_dict.items():
-        setattr(db_ric, key, value)
+    try:
+        update_dict = ric_data.model_dump(exclude_unset=True)
+        for key, value in update_dict.items():
+            setattr(db_ric, key, value)
 
-    db.commit()
-    db.refresh(db_ric)
-    return db_ric
+        db.commit()
+        db.refresh(db_ric)
+        return db_ric
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update the recurring transaction"
+        )
 
 @router.delete("/{ricorrenza_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_ricorrenza(
@@ -57,10 +85,24 @@ def delete_ricorrenza(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    db_ric = db.query(Ricorrenza).filter(Ricorrenza.id == ricorrenza_id, Ricorrenza.user_id == current_user_id).first()
+    db_ric = db.query(Ricorrenza).filter(
+        Ricorrenza.id == ricorrenza_id, 
+        Ricorrenza.user_id == current_user_id
+    ).first()
+    
     if not db_ric:
-        raise HTTPException(status_code=404, detail="Ricorrenza non trovata")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="Recurring transaction not found"
+        )
 
-    db.delete(db_ric)
-    db.commit()
-    return None
+    try:
+        db.delete(db_ric)
+        db.commit()
+        return None
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while deleting the recurring transaction"
+        )

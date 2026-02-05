@@ -8,60 +8,84 @@ from models import User
 from schemas import Token, UserCreate, UserBudgetUpdate, UserResponse
 
 router = APIRouter(
-    tags=["User"]        # Raggruppa questi endpoint nella documentazione Swagger
+    tags=["User"]
 )
 
 # --- ENDPOINT UTENTI ---
 
 @router.post("/register", response_model=Token)
 def register_user(user: UserCreate, db: Session = Depends(get_db)):
-    # Normalizziamo input in lowercase
+    # Controllo campi obbligatori
+    if not user.username or not user.password or not user.email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Missing fields. Please provide username, email, and password"
+        )
+    
+    # Normalizzazione input
     email_lower = user.email.lower()
     username_lower = user.username.lower()
 
-    # 1. Controllo duplicati usando i valori normalizzati
+    # 1. Controllo duplicati
     if db.query(User).filter(User.email == email_lower).first():
-        raise HTTPException(status_code=400, detail="L'indirizzo email inserito è già associato a un account.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="The email address you entered is already associated with an account"
+        )
     
     if db.query(User).filter(User.username == username_lower).first():
-        raise HTTPException(status_code=400, detail="Lo username scelto non è disponibile.")
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="The username you selected is not available"
+        )
     
-    # 2. Hash della password e creazione utente con dati lowercase
-    hashed_pwd = auth.get_password_hash(user.password)
-    new_user = User(
-        email=email_lower, 
-        username=username_lower, 
-        hashed_password=hashed_pwd,
-    )
-    
-    db.add(new_user)
-    db.commit()
-    db.refresh(new_user)
-    
-    access_token = auth.create_access_token(data={"user_id": new_user.id})
-    
-    return {
-        "access_token": access_token,
-        "username": new_user.username # Restituisce il valore lowercase salvato
-    }
+    # 2. Creazione Utente
+    try:
+        hashed_pwd = auth.get_password_hash(user.password)
+        new_user = User(
+            email=email_lower, 
+            username=username_lower, 
+            hashed_password=hashed_pwd,
+        )
+        
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        access_token = auth.create_access_token(data={"user_id": new_user.id})
+        
+        return {
+            "access_token": access_token,
+            "username": new_user.username
+        }
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating your account. Please try again later"
+        )
 
 @router.post("/login", response_model=Token)
 def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    # Trasformiamo lo username in lowercase per il confronto nel DB
-    username_lower = form_data.username.lower()
+    if not form_data.username or not form_data.password:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, 
+            detail="Username and password are required"
+        )
     
+    username_lower = form_data.username.lower()
     user = db.query(User).filter(User.username == username_lower).first()
     
     if not user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Account non trovato. Verifica lo username inserito."
+            detail="Account not found. Please verify your username"
         )
     
     if not auth.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, 
-            detail="Password errata. Riprova."
+            detail="Incorrect password. Try again"
         )
     
     access_token = auth.create_access_token(data={"user_id": user.id})
@@ -76,13 +100,12 @@ def get_me(
     db: Session = Depends(get_db), 
     current_user_id: int = Depends(auth.get_current_user_id)
 ):
-    # Cerchiamo l'utente nel DB partendo dall'ID estratto dal token
     user = db.query(User).filter(User.id == current_user_id).first()
     
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Utente non trovato"
+            detail="User not found. Your session may have expired"
         )
     
     return user
@@ -96,11 +119,21 @@ def update_monthly_budget(
     user = db.query(User).filter(User.id == current_user_id).first()
     
     if not user:
-        raise HTTPException(status_code=404, detail="Utente non trovato")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, 
+            detail="User account not found"
+        )
 
-    # Aggiorniamo il budget nel database
-    user.total_budget = budget_data.totalBudget
-    db.commit()
-    
-    # Restituiamo i dati aggiornati (richiamando la logica di calcolo)
-    return get_current_month_expenses(db, current_user_id)
+    try:
+        # Aggiornamento budget
+        user.total_budget = budget_data.totalBudget
+        db.commit()
+        
+        # Restituiamo i dati aggiornati
+        return get_current_month_expenses(db, current_user_id)
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to update monthly budget"
+        )
