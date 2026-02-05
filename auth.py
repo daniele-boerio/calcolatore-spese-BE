@@ -45,6 +45,8 @@ def get_current_user_id(token: str = Depends(oauth2_scheme)):
         detail="Unable to validate credentials",
         headers={"WWW-Authenticate": "Bearer"},
     )
+    print(f"DEBUG TOKEN: {token}")  # Verifica che arrivi la stringa
+    print(f"DEBUG SECRET: {os.getenv('SECRET_KEY')}")
     try:
         payload = jwt.decode(
             token, os.getenv("SECRET_KEY"), algorithms=[os.getenv("ALGORITHM")]
