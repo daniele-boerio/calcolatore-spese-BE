@@ -9,34 +9,36 @@ from dateutil.relativedelta import relativedelta
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 def get_live_price(ticker_symbol: str, isin_code: str):
     # La logica rimane valida: yfinance preferisce il Ticker, ma l'ISIN è più preciso per i titoli europei
     search_term = ticker_symbol if ticker_symbol else isin_code
     if not search_term:
         return None
-    
+
     try:
         ticker = yf.Ticker(search_term)
         data = ticker.history(period="1d")
-        
+
         if not data.empty:
-            return float(data['Close'].iloc[-1])
-        
+            return float(data["Close"].iloc[-1])
+
         # Secondo tentativo se il primo fallisce
         if ticker_symbol and isin_code and search_term != isin_code:
             logger.info(f"Ticker {ticker_symbol} fallito, provo con ISIN {isin_code}")
             ticker = yf.Ticker(isin_code)
             data = ticker.history(period="1d")
             if not data.empty:
-                return float(data['Close'].iloc[-1])
-                
+                return float(data["Close"].iloc[-1])
+
         logger.warning(f"Nessun dato trovato per {search_term}")
         return None
 
     except Exception as e:
         logger.error(f"Errore critico durante yfinance per {search_term}: {str(e)}")
         return None
-    
+
+
 def task_aggiornamento_prezzi():
     """
     Questo task aggiorna solo il campo 'prezzo_attuale' nell'anagrafica Investimento.
@@ -47,25 +49,31 @@ def task_aggiornamento_prezzi():
     try:
         # Recuperiamo solo i titoli che hanno un ticker o un ISIN
         investimenti = db.query(models.Investimento).all()
-        
+
         for inv in investimenti:
             try:
                 prezzo_live = get_live_price(inv.ticker, inv.isin)
-                
+
                 if prezzo_live:
                     inv.prezzo_attuale = prezzo_live
                     inv.data_ultimo_aggiornamento = date.today()
-                    
+
                     # OPZIONALE: Se vuoi loggare il profitto attuale usando la @property:
-                    logger.info(f"{inv.nome_titolo}: Prezzo {prezzo_live} - P&L: {inv.valore_posizione - (inv.quantita_totale * inv.prezzo_medio_carico)}")
-                    
-                    logger.info(f"Aggiornato {inv.nome_titolo or inv.isin}: {prezzo_live}")
+                    logger.info(
+                        f"{inv.nome_titolo}: Prezzo {prezzo_live} - P&L: {inv.valore_posizione - (inv.quantita_totale * inv.prezzo_medio_carico)}"
+                    )
+
+                    logger.info(
+                        f"Aggiornato {inv.nome_titolo or inv.isin}: {prezzo_live}"
+                    )
                 else:
-                    logger.warning(f"Impossibile trovare prezzo live per {inv.nome_titolo or inv.isin}")
-            
+                    logger.warning(
+                        f"Impossibile trovare prezzo live per {inv.nome_titolo or inv.isin}"
+                    )
+
             except Exception as e:
                 logger.error(f"Errore durante l'aggiornamento del titolo {inv.id}: {e}")
-                continue 
+                continue
 
         db.commit()
         logger.info("Task aggiornamento prezzi completato.")
@@ -75,15 +83,20 @@ def task_aggiornamento_prezzi():
     finally:
         db.close()
 
+
 def task_transazioni_ricorrenti():
     db = SessionLocal()
     today = date.today()
-    
+
     # 1. Trova tutte le ricorrenze attive che devono essere eseguite oggi o prima
-    ricorrenze = db.query(models.Ricorrenza).filter(
-        models.Ricorrenza.attiva == True,
-        models.Ricorrenza.prossima_esecuzione <= today
-    ).all()
+    ricorrenze = (
+        db.query(models.Ricorrenza)
+        .filter(
+            models.Ricorrenza.attiva,
+            models.Ricorrenza.prossima_esecuzione <= today,
+        )
+        .all()
+    )
 
     for ric in ricorrenze:
         # 2. Crea la transazione reale
@@ -94,9 +107,9 @@ def task_transazioni_ricorrenti():
             data=datetime.combine(ric.prossima_esecuzione, datetime.min.time()),
             conto_id=ric.conto_id,
             categoria_id=ric.categoria_id,
-            tag_id=ric.tag_id
+            tag_id=ric.tag_id,
         )
-        
+
         # 3. Aggiorna il saldo del conto associato
         conto = db.query(models.Conto).get(ric.conto_id)
         if ric.tipo.upper() == "ENTRATA":
@@ -115,19 +128,24 @@ def task_transazioni_ricorrenti():
             ric.prossima_esecuzione += relativedelta(years=1)
 
         db.add(nuova_trans)
-    
+
     db.commit()
     db.close()
+
 
 def task_ricarica_automatica_conti():
     db = SessionLocal()
     today = date.today()
-    
+
     # Trova i conti con ricarica attiva che devono essere controllati oggi
-    conti_da_controllare = db.query(models.Conto).filter(
-        models.Conto.ricarica_automatica == True,
-        models.Conto.prossimo_controllo <= today
-    ).all()
+    conti_da_controllare = (
+        db.query(models.Conto)
+        .filter(
+            models.Conto.ricarica_automatica,
+            models.Conto.prossimo_controllo <= today,
+        )
+        .all()
+    )
 
     for conto in conti_da_controllare:
         # Se il saldo è sceso sotto la soglia minima
@@ -142,7 +160,7 @@ def task_ricarica_automatica_conti():
                     tipo="USCITA",
                     descrizione=f"Ricarica automatica verso {conto.nome}",
                     data=datetime.now(),
-                    conto_id=conto_sorgente.id
+                    conto_id=conto_sorgente.id,
                 )
                 # 2. Crea la transazione di entrata nel conto target
                 entrata = models.Transazione(
@@ -150,13 +168,13 @@ def task_ricarica_automatica_conti():
                     tipo="ENTRATA",
                     descrizione=f"Ricarica automatica da {conto_sorgente.nome}",
                     data=datetime.now(),
-                    conto_id=conto.id
+                    conto_id=conto.id,
                 )
-                
+
                 # Aggiorna i saldi
                 conto_sorgente.saldo -= importo_ricarica
                 conto.saldo += importo_ricarica
-                
+
                 db.add(uscita)
                 db.add(entrata)
 

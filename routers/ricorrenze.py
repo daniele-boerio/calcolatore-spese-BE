@@ -8,22 +8,24 @@ from schemas import RicorrenzaOut, RicorrenzaCreate, RicorrenzaUpdate
 
 router = APIRouter(prefix="/ricorrenze", tags=["Ricorrenze"])
 
+
 @router.post("", response_model=RicorrenzaOut)
 def create_ricorrenza(
-    ricorrenza: RicorrenzaCreate, 
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
+    ricorrenza: RicorrenzaCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
 ):
     # 1. Verify that the account belongs to the user
-    conto = db.query(Conto).filter(
-        Conto.id == ricorrenza.conto_id, 
-        Conto.user_id == current_user_id
-    ).first()
-    
+    conto = (
+        db.query(Conto)
+        .filter(Conto.id == ricorrenza.conto_id, Conto.user_id == current_user_id)
+        .first()
+    )
+
     if not conto:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Account not found or unauthorized"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or unauthorized",
         )
 
     try:
@@ -36,32 +38,35 @@ def create_ricorrenza(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while creating the recurring transaction"
+            detail="An error occurred while creating the recurring transaction",
         )
+
 
 @router.get("", response_model=List[RicorrenzaOut])
 def get_ricorrenze(
-    db: Session = Depends(get_db), 
-    current_user_id: int = Depends(auth.get_current_user_id)
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
 ):
     return db.query(Ricorrenza).filter(Ricorrenza.user_id == current_user_id).all()
+
 
 @router.put("/{ricorrenza_id}", response_model=RicorrenzaOut)
 def update_ricorrenza(
     ricorrenza_id: int,
     ric_data: RicorrenzaUpdate,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id)
+    current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    db_ric = db.query(Ricorrenza).filter(
-        Ricorrenza.id == ricorrenza_id, 
-        Ricorrenza.user_id == current_user_id
-    ).first()
-    
+    db_ric = (
+        db.query(Ricorrenza)
+        .filter(Ricorrenza.id == ricorrenza_id, Ricorrenza.user_id == current_user_id)
+        .first()
+    )
+
     if not db_ric:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Recurring transaction not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recurring transaction not found",
         )
 
     try:
@@ -76,24 +81,26 @@ def update_ricorrenza(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update the recurring transaction"
+            detail="Failed to update the recurring transaction",
         )
+
 
 @router.delete("/{ricorrenza_id}", status_code=status.HTTP_204_NO_CONTENT)
 def delete_ricorrenza(
     ricorrenza_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id)
+    current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    db_ric = db.query(Ricorrenza).filter(
-        Ricorrenza.id == ricorrenza_id, 
-        Ricorrenza.user_id == current_user_id
-    ).first()
-    
+    db_ric = (
+        db.query(Ricorrenza)
+        .filter(Ricorrenza.id == ricorrenza_id, Ricorrenza.user_id == current_user_id)
+        .first()
+    )
+
     if not db_ric:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, 
-            detail="Recurring transaction not found"
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recurring transaction not found",
         )
 
     try:
@@ -104,5 +111,5 @@ def delete_ricorrenza(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while deleting the recurring transaction"
+            detail="An error occurred while deleting the recurring transaction",
         )

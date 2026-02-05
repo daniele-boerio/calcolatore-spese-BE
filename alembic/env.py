@@ -8,7 +8,6 @@ from alembic import context
 
 # Importa Base e modelli per permettere ad Alembic di vedere le tabelle
 from database import Base
-import models  # Importante per caricare tutti i modelli
 from dotenv import load_dotenv
 
 # Carica le variabili dal file .env
@@ -24,6 +23,7 @@ if config.config_file_name is not None:
 # Impostiamo i metadati dei modelli per l'autogenerazione delle migrazioni
 target_metadata = Base.metadata
 
+
 def get_url():
     """Compone l'URL del database usando le variabili d'ambiente."""
     user = os.getenv("DB_USER")
@@ -32,6 +32,7 @@ def get_url():
     port = os.getenv("DB_PORT")
     database = os.getenv("DB_NAME")
     return f"postgresql://{user}:{password}@{host}:{port}/{database}"
+
 
 def run_migrations_offline() -> None:
     """Esegue le migrazioni in modalità 'offline'."""
@@ -46,13 +47,14 @@ def run_migrations_offline() -> None:
     with context.begin_transaction():
         context.run_migrations()
 
+
 def run_migrations_online() -> None:
     """Esegue le migrazioni in modalità 'online'."""
-    
+
     # Sovrascriviamo la configurazione dell'URL nel file .ini con quella del .env
     configuration = config.get_section(config.config_ini_section, {})
     configuration["sqlalchemy.url"] = get_url()
-    
+
     connectable = engine_from_config(
         configuration,
         prefix="sqlalchemy.",
@@ -60,13 +62,11 @@ def run_migrations_online() -> None:
     )
 
     with connectable.connect() as connection:
-        context.configure(
-            connection=connection, 
-            target_metadata=target_metadata
-        )
+        context.configure(connection=connection, target_metadata=target_metadata)
 
         with context.begin_transaction():
             context.run_migrations()
+
 
 if context.is_offline_mode():
     run_migrations_offline()

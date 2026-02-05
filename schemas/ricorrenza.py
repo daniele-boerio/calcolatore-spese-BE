@@ -1,9 +1,9 @@
 from datetime import datetime
-from enum import Enum
 from pydantic import BaseModel
 from datetime import date
 from typing import Optional
 from schemas.transazione import TipoTransazione
+
 
 class RicorrenzaBase(BaseModel):
     nome: str
@@ -16,8 +16,10 @@ class RicorrenzaBase(BaseModel):
     categoria_id: Optional[int] = None
     tag_id: Optional[int] = None
 
+
 class RicorrenzaCreate(RicorrenzaBase):
     pass
+
 
 class RicorrenzaUpdate(BaseModel):
     nome: Optional[str] = None
@@ -28,6 +30,7 @@ class RicorrenzaUpdate(BaseModel):
     conto_id: Optional[int] = None
     categoria_id: Optional[int] = None
     tag_id: Optional[int] = None
+
 
 class RicorrenzaOut(RicorrenzaBase):
     id: int
