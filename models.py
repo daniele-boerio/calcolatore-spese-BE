@@ -62,6 +62,8 @@ class Conto(Base):
         Date, nullable=True
     )  # Quando effettuare il prossimo check
 
+    color = Column(String, default="#4b6cb7")
+
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
 
     transazioni = relationship(
