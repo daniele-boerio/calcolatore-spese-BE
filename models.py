@@ -143,7 +143,7 @@ class Transazione(Base):
     id = Column(Integer, primary_key=True, index=True)
     importo = Column(Float, nullable=False)
     tipo = Column(String, nullable=False)  # "ENTRATA", "USCITA" o "RIMBORSO"
-    data = Column(DateTime)
+    data = Column(Date)
     descrizione = Column(String)
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))

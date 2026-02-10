@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
@@ -118,8 +118,8 @@ def get_current_month_expenses(
             detail="User session invalid or account not found",
         )
 
-    today = datetime.now(timezone.utc)
-    first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    today = date.today()
+    first_day = today.replace(day=1)
 
     # 1. Total OUTGOING
     total_out = (
@@ -167,8 +167,8 @@ def get_expenses_by_category(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    today = datetime.now(timezone.utc)
-    first_day = today.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    today = date.today()
+    first_day = today.replace(day=1)
 
     # Fetch all transactions (Expenses and Refunds) for the month
     transazioni = (

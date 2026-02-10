@@ -1,6 +1,6 @@
 from pydantic import BaseModel
 from typing import Optional
-from datetime import datetime, timezone
+from datetime import datetime, date
 from enum import Enum
 
 
@@ -14,7 +14,7 @@ class TipoTransazione(str, Enum):
 class TransazioneBase(BaseModel):
     importo: float
     tipo: TipoTransazione
-    data: datetime = datetime.now(timezone.utc)
+    data: date = date.today()
     descrizione: Optional[str] = None
     conto_id: int
     categoria_id: Optional[int] = None
