@@ -8,7 +8,9 @@ from alembic import context
 
 # Importa Base e modelli per permettere ad Alembic di vedere le tabelle
 from database import Base
+import models
 from dotenv import load_dotenv
+
 
 # Carica le variabili dal file .env
 load_dotenv()
