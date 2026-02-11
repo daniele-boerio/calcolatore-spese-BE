@@ -13,7 +13,7 @@ class ContoBase(BaseModel):
     conto_sorgente_id: Optional[int] = None
     frequenza_controllo: Optional[str] = None  # "SETTIMANALE" o "MENSILE"
     prossimo_controllo: Optional[date] = None
-    color: Optional[str] = "#4b6cb7"
+    color: Optional[str] = None
 
 
 class ContoCreate(ContoBase):
@@ -29,7 +29,7 @@ class ContoUpdate(BaseModel):
     conto_sorgente_id: Optional[int] = None
     frequenza_controllo: Optional[str] = None
     prossimo_controllo: Optional[date] = None
-    color: Optional[str] = "#4b6cb7"
+    color: Optional[str] = None
 
 
 class ContoOut(ContoBase):
