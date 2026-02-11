@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Conto, Transazione, User
-from schemas import ContoCreate, ContoOut, ContoUpdate
+from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
 from schemas.transazione import TipoTransazione
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/conti", tags=["Conti"])
 
@@ -35,10 +36,19 @@ def create_conto(
 
 @router.get("", response_model=list[ContoOut])
 def get_conti(
+    filters: ContoFilters = Depends(),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    return db.query(Conto).filter(Conto.user_id == current_user_id).all()
+    query = db.query(Conto).filter(Conto.user_id == current_user_id)
+
+    query = apply_filters_and_sort(
+        query,
+        Conto,
+        filters=filters,
+    )
+
+    return query.all()
 
 
 @router.put("/{conto_id}", response_model=ContoOut)

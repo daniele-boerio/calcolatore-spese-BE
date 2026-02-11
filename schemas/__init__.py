@@ -7,7 +7,7 @@ from .user import (
     UserBudgetUpdate,
     UserResponse,
 )
-from .conto import ContoBase, ContoCreate, ContoUpdate, ContoOut
+from .conto import ContoBase, ContoCreate, ContoUpdate, ContoOut, ContoFilters
 from .categoria import CategoriaBase, CategoriaCreate, CategoriaUpdate, CategoriaOut
 from .sottocategoria import (
     SottocategoriaBase,
@@ -22,6 +22,7 @@ from .transazione import (
     TransazioneUpdate,
     TransazioneOut,
     TransazionePagination,
+    TransazioneFilters,
 )
 from .investimento import (
     InvestimentoCreate,
@@ -30,10 +31,12 @@ from .investimento import (
     StoricoInvestimentoCreate,
     StoricoInvestimentoUpdate,
     StoricoInvestimentoOut,
+    InvestimentoFilters,
 )
 from .ricorrenza import (
     RicorrenzaBase,
     RicorrenzaCreate,
     RicorrenzaUpdate,
     RicorrenzaOut,
+    RicorrenzaFilters,
 )

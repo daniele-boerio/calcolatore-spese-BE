@@ -7,9 +7,12 @@ from schemas import (
     TransazioneOut,
     TransazionePagination,
     TransazioneUpdate,
+    TransazioneFilters,
 )
 from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
+
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
@@ -79,14 +82,23 @@ def create_transazione(
 def get_transazioni(
     page: int = 1,
     size: int = 10,
+    filters: TransazioneFilters = Depends(),  # Aggiunto qui
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     offset = (page - 1) * size
+
+    # 1. Query base
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
 
+    # 2. Applichiamo filtri e ordinamento (importo_min, tipo, sort_by, ecc.)
+    query = apply_filters_and_sort(query, Transazione, filters)
+
+    # 3. Contiamo il totale DOPO i filtri
     total = query.count()
-    data = query.order_by(Transazione.data.desc()).offset(offset).limit(size).all()
+
+    # 4. Applichiamo i limiti per la pagina specifica
+    data = query.offset(offset).limit(size).all()
 
     return {"total": total, "page": page, "size": size, "data": data}
 
@@ -94,16 +106,17 @@ def get_transazioni(
 @router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     n: int,
+    filters: TransazioneFilters = Depends(),  # Aggiunto qui
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    return (
-        db.query(Transazione)
-        .filter(Transazione.user_id == current_user_id)
-        .order_by(Transazione.data.desc())
-        .limit(n)
-        .all()
-    )
+    query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
+
+    # Applichiamo i filtri (se presenti) e l'ordinamento
+    # Se sort_by non viene inviato, TransazioneFilters userà il default (es. data desc)
+    query = apply_filters_and_sort(query, Transazione, filters)
+
+    return query.limit(n).all()
 
 
 @router.put("/{transazione_id}", response_model=TransazioneOut)
@@ -212,17 +225,3 @@ def delete_transazione(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the transaction",
         )
-
-
-@router.get("/tag/{tag_id}", response_model=list[TransazioneOut])
-def get_transazioni_by_tag(
-    tag_id: int,
-    db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
-):
-    return (
-        db.query(Transazione)
-        .filter(Transazione.tag_id == tag_id, Transazione.user_id == current_user_id)
-        .order_by(Transazione.data.desc())
-        .all()
-    )

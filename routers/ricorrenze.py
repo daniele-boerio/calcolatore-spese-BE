@@ -4,7 +4,8 @@ from typing import List
 from database import get_db
 import auth
 from models import Ricorrenza, Conto
-from schemas import RicorrenzaOut, RicorrenzaCreate, RicorrenzaUpdate
+from schemas import RicorrenzaOut, RicorrenzaCreate, RicorrenzaUpdate, RicorrenzaFilters
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/ricorrenze", tags=["Ricorrenze"])
 
@@ -44,10 +45,19 @@ def create_ricorrenza(
 
 @router.get("", response_model=List[RicorrenzaOut])
 def get_ricorrenze(
+    filters: RicorrenzaFilters = Depends(),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    return db.query(Ricorrenza).filter(Ricorrenza.user_id == current_user_id).all()
+    query = db.query(Ricorrenza).filter(Ricorrenza.user_id == current_user_id)
+
+    query = apply_filters_and_sort(
+        query,
+        Ricorrenza,
+        filters=filters,
+    )
+
+    return query.all()
 
 
 @router.put("/{ricorrenza_id}", response_model=RicorrenzaOut)

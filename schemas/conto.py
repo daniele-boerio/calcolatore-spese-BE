@@ -40,3 +40,13 @@ class ContoOut(ContoBase):
 
     class Config:
         from_attributes = True
+
+
+class ContoFilters(BaseModel):
+    sort_by: Optional[str] = "nome"
+    sort_order: Optional[str] = "asc"
+    nome: Optional[str] = None
+    saldo_min: Optional[float] = None
+    saldo_max: Optional[float] = None
+    ricarica_automatica: Optional[bool] = None
+    conto_sorgente_id: Optional[int] = None

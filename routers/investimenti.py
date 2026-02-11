@@ -10,7 +10,9 @@ from schemas.investimento import (
     StoricoInvestimentoCreate,
     StoricoInvestimentoOut,
     StoricoInvestimentoUpdate,
+    InvestimentoFilters,
 )
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/investimenti", tags=["Investimenti"])
 
@@ -18,10 +20,19 @@ router = APIRouter(prefix="/investimenti", tags=["Investimenti"])
 # 1. GET ALL - All user investments
 @router.get("", response_model=list[InvestimentoOut])
 def get_investimenti(
+    filters: InvestimentoFilters = Depends(),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    return db.query(Investimento).filter(Investimento.user_id == current_user_id).all()
+    query = db.query(Investimento).filter(Investimento.user_id == current_user_id)
+
+    query = apply_filters_and_sort(
+        query,
+        Investimento,
+        filters=filters,
+    )
+
+    return query.all()
 
 
 # 2. GET SINGLE - Specific investment details

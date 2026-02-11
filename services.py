@@ -4,6 +4,9 @@ import logging
 from database import SessionLocal
 import models
 from dateutil.relativedelta import relativedelta
+from sqlalchemy.orm import Query
+from sqlalchemy import asc, desc
+from pydantic import BaseModel
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -188,3 +191,47 @@ def task_ricarica_automatica_conti():
 
     db.commit()
     db.close()
+
+
+def apply_filters_and_sort(query: Query, model, filters: BaseModel):
+    filter_data = filters.model_dump(exclude_unset=True)
+    sort_by = filter_data.pop("sort_by", None)
+    sort_order = filter_data.pop("sort_order", "asc")
+
+    for field, value in filter_data.items():
+        if value is None:
+            continue
+
+        # Gestione Range Importo (_min / _max)
+        if field.endswith("_min") and hasattr(model, field.replace("_min", "")):
+            column = getattr(model, field.replace("_min", ""))
+            query = query.filter(column >= value)
+        elif field.endswith("_max") and hasattr(model, field.replace("_max", "")):
+            column = getattr(model, field.replace("_max", ""))
+            query = query.filter(column <= value)
+
+        # Gestione Range Date (_inizio / _fine)
+        elif field.endswith("_inizio") and hasattr(model, field.replace("_inizio", "")):
+            column = getattr(model, field.replace("_inizio", ""))
+            query = query.filter(column >= value)
+        elif field.endswith("_fine") and hasattr(model, field.replace("_fine", "")):
+            column = getattr(model, field.replace("_fine", ""))
+            query = query.filter(column <= value)
+
+        # Ricerca parziale per la descrizione (LIKE)
+        elif field == "nome":
+            query = query.filter(model.descrizione.ilike(f"%{value}%"))
+
+        elif field == "descrizione":
+            query = query.filter(model.descrizione.ilike(f"%{value}%"))
+
+        # Uguaglianza standard per gli altri campi (conto_id, tipo, etc.)
+        elif hasattr(model, field):
+            query = query.filter(getattr(model, field) == value)
+
+    # Ordinamento
+    if sort_by and hasattr(model, sort_by):
+        order_func = desc if sort_order.lower() == "desc" else asc
+        query = query.order_by(order_func(getattr(model, sort_by)))
+
+    return query

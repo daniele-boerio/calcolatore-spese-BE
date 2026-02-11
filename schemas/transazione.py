@@ -47,3 +47,19 @@ class TransazionePagination(BaseModel):
     page: int  # Pagina attuale
     size: int  # Numero di elementi per pagina
     data: list[TransazioneOut]  # La lista effettiva delle transazioni
+
+
+class TransazioneFilters(BaseModel):
+    sort_by: Optional[str] = "data"
+    sort_order: Optional[str] = "desc"
+    # Campi per il range di importo
+    importo_min: Optional[float] = None
+    importo_max: Optional[float] = None
+    # Altri filtri (resi opzionali)
+    tipo: Optional[str] = None
+    data_inizio: Optional[date] = None
+    data_fine: Optional[date] = None
+    descrizione: Optional[str] = None
+    conto_id: Optional[int] = None
+    categoria_id: Optional[int] = None
+    tag_id: Optional[int] = None

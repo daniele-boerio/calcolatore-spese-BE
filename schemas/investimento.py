@@ -61,3 +61,16 @@ class InvestimentoOut(InvestimentoBase):
 
     class Config:
         from_attributes = True
+
+
+class InvestimentoFilters(BaseModel):
+    sort_by: Optional[str] = "nome_titolo"
+    sort_order: Optional[str] = "asc"
+    isin: Optional[str] = None
+    ticker: Optional[str] = None
+    nome_titolo: Optional[str] = None
+    # Range per quantità e valore
+    quantita_min: Optional[float] = None
+    quantita_max: Optional[float] = None
+    valore_attuale_min: Optional[float] = None
+    valore_attuale_max: Optional[float] = None
