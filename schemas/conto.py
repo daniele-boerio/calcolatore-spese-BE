@@ -49,4 +49,3 @@ class ContoFilters(BaseModel):
     saldo_min: Optional[float] = None
     saldo_max: Optional[float] = None
     ricarica_automatica: Optional[bool] = None
-    conto_sorgente_id: Optional[int] = None

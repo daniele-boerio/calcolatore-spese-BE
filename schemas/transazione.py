@@ -2,6 +2,7 @@ from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, date
 from enum import Enum
+from fastapi import Query
 
 
 class TipoTransazione(str, Enum):
@@ -52,14 +53,15 @@ class TransazionePagination(BaseModel):
 class TransazioneFilters(BaseModel):
     sort_by: Optional[str] = "data"
     sort_order: Optional[str] = "desc"
-    # Campi per il range di importo
     importo_min: Optional[float] = None
     importo_max: Optional[float] = None
-    # Altri filtri (resi opzionali)
     tipo: Optional[str] = None
     data_inizio: Optional[date] = None
     data_fine: Optional[date] = None
     descrizione: Optional[str] = None
-    conto_id: Optional[int] = None
-    categoria_id: Optional[int] = None
-    tag_id: Optional[int] = None
+
+    # Usiamo List[int] e Query(None) per permettere più valori
+    conto_id: Optional[list[int]] = Query(None)
+    categoria_id: Optional[list[int]] = Query(None)
+    sottocategoria_id: Optional[list[int]] = Query(None)
+    tag_id: Optional[list[int]] = Query(None)

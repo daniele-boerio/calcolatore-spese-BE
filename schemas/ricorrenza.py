@@ -3,6 +3,7 @@ from pydantic import BaseModel
 from datetime import date
 from typing import Optional
 from schemas.transazione import TipoTransazione
+from fastapi import Query
 
 
 class RicorrenzaBase(BaseModel):
@@ -48,6 +49,7 @@ class RicorrenzaFilters(BaseModel):
     sort_by: Optional[str] = "prossima_esecuzione"
     sort_order: Optional[str] = "asc"
     nome: Optional[str] = None
+    tipo: Optional[str] = None
     # Range per l'importo
     importo_min: Optional[float] = None
     importo_max: Optional[float] = None
@@ -56,7 +58,8 @@ class RicorrenzaFilters(BaseModel):
     prossima_esecuzione_inizio: Optional[date] = None
     prossima_esecuzione_fine: Optional[date] = None
     attiva: Optional[bool] = None
-    conto_id: Optional[int] = None
-    categoria_id: Optional[int] = None
-    sottocategoria_id: Optional[int] = None
-    tag_id: Optional[int] = None
+    # Usiamo List[int] e Query(None) per permettere più valori
+    conto_id: Optional[list[int]] = Query(None)
+    categoria_id: Optional[list[int]] = Query(None)
+    sottocategoria_id: Optional[list[int]] = Query(None)
+    tag_id: Optional[list[int]] = Query(None)

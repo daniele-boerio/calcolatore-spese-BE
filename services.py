@@ -202,15 +202,21 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
         if value is None:
             continue
 
-        # Gestione Range Importo (_min / _max)
-        if field.endswith("_min") and hasattr(model, field.replace("_min", "")):
+        # 1. Gestione LISTE (Clausola IN)
+        # Se il valore è una lista, usiamo .in_() per filtrare più ID contemporaneamente
+        if isinstance(value, list) and hasattr(model, field):
+            column = getattr(model, field)
+            query = query.filter(column.in_(value))
+
+        # 2. Gestione Range Importo (_min / _max)
+        elif field.endswith("_min") and hasattr(model, field.replace("_min", "")):
             column = getattr(model, field.replace("_min", ""))
             query = query.filter(column >= value)
         elif field.endswith("_max") and hasattr(model, field.replace("_max", "")):
             column = getattr(model, field.replace("_max", ""))
             query = query.filter(column <= value)
 
-        # Gestione Range Date (_inizio / _fine)
+        # 3. Gestione Range Date (_inizio / _fine)
         elif field.endswith("_inizio") and hasattr(model, field.replace("_inizio", "")):
             column = getattr(model, field.replace("_inizio", ""))
             query = query.filter(column >= value)
@@ -218,14 +224,16 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
             column = getattr(model, field.replace("_fine", ""))
             query = query.filter(column <= value)
 
-        # Ricerca parziale per la descrizione (LIKE)
-        elif field == "nome":
-            query = query.filter(model.descrizione.ilike(f"%{value}%"))
+        # 4. Ricerca parziale (LIKE)
+        elif field in [
+            "nome",
+            "descrizione",
+            "nome_titolo",
+        ] and hasattr(model, field):
+            column = getattr(model, field)
+            query = query.filter(column.ilike(f"%{value}%"))
 
-        elif field == "descrizione":
-            query = query.filter(model.descrizione.ilike(f"%{value}%"))
-
-        # Uguaglianza standard per gli altri campi (conto_id, tipo, etc.)
+        # 5. Uguaglianza standard per gli altri campi singoli
         elif hasattr(model, field):
             query = query.filter(getattr(model, field) == value)
 
@@ -233,5 +241,7 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
     if sort_by and hasattr(model, sort_by):
         order_func = desc if sort_order.lower() == "desc" else asc
         query = query.order_by(order_func(getattr(model, sort_by)))
+    elif hasattr(model, "id"):
+        query = query.order_by(desc(model.id))
 
     return query
