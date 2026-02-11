@@ -104,9 +104,11 @@ def task_transazioni_ricorrenti():
             importo=ric.importo,
             tipo=ric.tipo,
             descrizione=f"Ricorrente: {ric.nome}",
-            data=datetime.combine(ric.prossima_esecuzione, datetime.min.time()),
+            data=datetime.now(),
             conto_id=ric.conto_id,
+            user_id=ric.user_id,
             categoria_id=ric.categoria_id,
+            sottocategoria_id=ric.sottocategoria_id,
             tag_id=ric.tag_id,
         )
 

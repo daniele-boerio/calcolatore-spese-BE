@@ -248,9 +248,9 @@ class StoricoInvestimento(Base):
 class Ricorrenza(Base):
     __tablename__ = "ricorrenze"
     id = Column(Integer, primary_key=True, index=True)
-    nome = Column(String, nullable=False)  # Es: "Affitto", "Netflix"
     importo = Column(Float, nullable=False)
-    tipo = Column(String, nullable=False)  # ENTRATA o USCITA
+    nome = Column(String, nullable=False)
+    tipo = Column(String, nullable=False)  # "ENTRATA", "USCITA" o "RIMBORSO"
     frequenza = Column(
         String, nullable=False
     )  # GIORNALIERA, SETTIMANALE, MENSILE, ANNUALE
@@ -262,6 +262,9 @@ class Ricorrenza(Base):
     conto_id = Column(Integer, ForeignKey("conti.id"))
     categoria_id = Column(
         Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True
+    )
+    sottocategoria_id = Column(
+        Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True
     )
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
 

@@ -14,6 +14,7 @@ class RicorrenzaBase(BaseModel):
     attiva: Optional[bool] = True
     conto_id: int
     categoria_id: Optional[int] = None
+    sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
 
 
@@ -29,6 +30,7 @@ class RicorrenzaUpdate(BaseModel):
     attiva: Optional[bool] = None
     conto_id: Optional[int] = None
     categoria_id: Optional[int] = None
+    sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
 
 
