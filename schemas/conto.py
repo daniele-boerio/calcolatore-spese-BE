@@ -29,6 +29,7 @@ class ContoUpdate(BaseModel):
     conto_sorgente_id: Optional[int] = None
     frequenza_controllo: Optional[str] = None
     prossimo_controllo: Optional[date] = None
+    color: Optional[str] = "#4b6cb7"
 
 
 class ContoOut(ContoBase):
