@@ -120,33 +120,33 @@ def get_transazioni(
 ):
     offset = (page - 1) * size
 
-    # 1. Query base filtrata (ma non paginata)
+    # 1. Query base filtrata
     base_query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
     base_query = apply_filters_and_sort(base_query, Transazione, filters)
 
-    # 2. Calcolo Totale Record
+    # 2. Calcolo Totale Record (count ignora l'order_by automaticamente)
     total = base_query.count()
 
-    # 3. Calcolo Totale Entrate (sulla query filtrata)
+    # 3. Calcolo Totale Entrate
+    # Rimuoviamo l'ordinamento con .order_by(None) per evitare il GroupingError
     total_entrata = (
         base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
+        .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
         .with_entities(func.sum(Transazione.importo))
         .scalar()
         or 0.0
     )
 
-    # 4. Calcolo Totale Uscite (sulla query filtrata)
-    # Nota: includiamo anche i rimborsi se vuoi il valore assoluto delle uscite nette,
-    # oppure solo USCITA. Qui calcoliamo solo il tipo USCITA.
+    # 4. Calcolo Totale Uscite
     total_uscita = (
         base_query.filter(Transazione.tipo == TipoTransazione.USCITA)
+        .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
         .with_entities(func.sum(Transazione.importo))
         .scalar()
         or 0.0
     )
 
-    # 5. Recupero dati paginati
-    # Applichiamo offset e limit solo qui alla fine
+    # 5. Recupero dati paginati (qui l'ordinamento serve e rimane quello di base_query)
     data = base_query.offset(offset).limit(size).all()
 
     return {
