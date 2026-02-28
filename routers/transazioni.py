@@ -15,6 +15,7 @@ from models import Conto, Transazione
 from services import apply_filters_and_sort
 from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
+from sqlalchemy import func
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
@@ -113,25 +114,49 @@ def create_transazione(
 def get_transazioni(
     page: int = 1,
     size: int = 10,
-    filters: TransazioneFilters = Depends(),  # Aggiunto qui
+    filters: TransazioneFilters = Depends(),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     offset = (page - 1) * size
 
-    # 1. Query base
-    query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
+    # 1. Query base filtrata (ma non paginata)
+    base_query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
+    base_query = apply_filters_and_sort(base_query, Transazione, filters)
 
-    # 2. Applichiamo filtri e ordinamento (importo_min, tipo, sort_by, ecc.)
-    query = apply_filters_and_sort(query, Transazione, filters)
+    # 2. Calcolo Totale Record
+    total = base_query.count()
 
-    # 3. Contiamo il totale DOPO i filtri
-    total = query.count()
+    # 3. Calcolo Totale Entrate (sulla query filtrata)
+    total_entrata = (
+        base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
+        .with_entities(func.sum(Transazione.importo))
+        .scalar()
+        or 0.0
+    )
 
-    # 4. Applichiamo i limiti per la pagina specifica
-    data = query.offset(offset).limit(size).all()
+    # 4. Calcolo Totale Uscite (sulla query filtrata)
+    # Nota: includiamo anche i rimborsi se vuoi il valore assoluto delle uscite nette,
+    # oppure solo USCITA. Qui calcoliamo solo il tipo USCITA.
+    total_uscita = (
+        base_query.filter(Transazione.tipo == TipoTransazione.USCITA)
+        .with_entities(func.sum(Transazione.importo))
+        .scalar()
+        or 0.0
+    )
 
-    return {"total": total, "page": page, "size": size, "data": data}
+    # 5. Recupero dati paginati
+    # Applichiamo offset e limit solo qui alla fine
+    data = base_query.offset(offset).limit(size).all()
+
+    return {
+        "total": total,
+        "page": page,
+        "size": size,
+        "total_entrata": round(total_entrata, 2),
+        "total_uscita": round(total_uscita, 2),
+        "data": data,
+    }
 
 
 @router.get("", response_model=list[TransazioneOut])

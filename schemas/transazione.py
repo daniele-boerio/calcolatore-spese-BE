@@ -47,6 +47,8 @@ class TransazionePagination(BaseModel):
     total: int  # Numero totale di transazioni per l'utente
     page: int  # Pagina attuale
     size: int  # Numero di elementi per pagina
+    total_entrata: float  # valore delle entrate
+    total_uscita: float  # Valore delle uscite
     data: list[TransazioneOut]  # La lista effettiva delle transazioni
 
 
