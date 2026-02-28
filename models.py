@@ -106,6 +106,7 @@ class Categoria(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+    lastImport = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Sottocategoria(Base):
@@ -128,6 +129,7 @@ class Sottocategoria(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+    lastImport = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Tag(Base):

@@ -13,10 +13,27 @@ from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
 
 from services import apply_filters_and_sort
+from datetime import datetime, timezone
+from models import Categoria, Sottocategoria
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
 # --- ENDPOINT TRANSAZIONI ---
+
+
+# Funzione di utilità per aggiornare le date delle categorie
+def update_category_usage(
+    db: Session, categoria_id: int = None, sottocategoria_id: int = None
+):
+    now = datetime.now(timezone.utc)
+    if categoria_id:
+        db.query(Categoria).filter(Categoria.id == categoria_id).update(
+            {"lastImport": now}
+        )
+    if sottocategoria_id:
+        db.query(Sottocategoria).filter(Sottocategoria.id == sottocategoria_id).update(
+            {"lastImport": now}
+        )
 
 
 @router.post("", response_model=TransazioneOut)
@@ -66,6 +83,11 @@ def create_transazione(
         # 4. Aggiornamento Saldo (Balance Update)
         modificatore = -1 if transazione.tipo == TipoTransazione.USCITA else 1
         conto.saldo += transazione.importo * modificatore
+
+        # AGGIORNAMENTO lastImport
+        update_category_usage(
+            db, transazione.categoria_id, transazione.sottocategoria_id
+        )
 
         db.commit()
         db.refresh(new_trans)
@@ -178,6 +200,9 @@ def update_transazione(
         # D. APPLICAZIONE al nuovo conto
         mod_nuovo = -1 if db_trans.tipo == TipoTransazione.USCITA else 1
         conto_nuovo.saldo += db_trans.importo * mod_nuovo
+
+        # E. AGGIORNAMENTO lastImport (usiamo i nuovi ID se sono cambiati)
+        update_category_usage(db, db_trans.categoria_id, db_trans.sottocategoria_id)
 
         db.commit()
         db.refresh(db_trans)

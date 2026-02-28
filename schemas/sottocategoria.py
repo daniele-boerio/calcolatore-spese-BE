@@ -21,6 +21,7 @@ class SottocategoriaOut(SottocategoriaBase):
     id: int
     creationDate: datetime
     lastUpdate: datetime
+    lastImport: datetime
     categoria_id: int
 
     class Config:

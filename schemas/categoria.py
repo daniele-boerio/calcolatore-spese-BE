@@ -23,6 +23,7 @@ class CategoriaOut(CategoriaBase):
     id: int
     creationDate: datetime
     lastUpdate: datetime
+    lastImport: datetime
     sottocategorie: List[SottocategoriaOut] = []
 
     class Config:
