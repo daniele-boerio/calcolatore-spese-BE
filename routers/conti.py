@@ -15,6 +15,13 @@ router = APIRouter(prefix="/conti", tags=["Conti"])
 # --- ENDPOINT CONTI ---
 
 
+def reset_default_account(db: Session, user_id: int):
+    """Imposta a False il campo default per tutti i conti dell'utente."""
+    db.query(Conto).filter(Conto.user_id == user_id, Conto.default).update(
+        {"default": False}
+    )
+
+
 @router.post("", response_model=ContoOut)
 def create_conto(
     conto: ContoCreate,
@@ -22,6 +29,9 @@ def create_conto(
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     try:
+        if conto.default:
+            reset_default_account(db, current_user_id)
+
         new_conto = Conto(**conto.model_dump(), user_id=current_user_id)
         db.add(new_conto)
         db.commit()
@@ -73,6 +83,10 @@ def update_conto(
 
     try:
         update_data = conto_data.model_dump(exclude_unset=True)
+
+        if update_data.get("default") is True:
+            reset_default_account(db, current_user_id)
+
         for key, value in update_data.items():
             setattr(db_conto, key, value)
 
@@ -188,7 +202,11 @@ def get_expenses_by_category(
     today = date.today()
     first_day = today.replace(day=1)
 
-    # Fetch all transactions (Expenses and Refunds) for the month
+    # Calcolo dell'ultimo giorno del mese corrente
+    _, last_day_num = calendar.monthrange(today.year, today.month)
+    last_day = today.replace(day=last_day_num)
+
+    # Fetch all transactions (Expenses and Refunds) specificamente per questo mese
     transazioni = (
         db.query(Transazione)
         .join(Conto)
@@ -199,6 +217,7 @@ def get_expenses_by_category(
                 Transazione.tipo == TipoTransazione.RIMBORSO,
             ),
             Transazione.data >= first_day,
+            Transazione.data <= last_day,  # Filtro per escludere transazioni future
         )
         .all()
     )
@@ -208,11 +227,13 @@ def get_expenses_by_category(
     for t in transazioni:
         cat_nome = t.categoria.nome if t.categoria else "Uncategorized"
 
+        # Logica: USCITA somma al totale della categoria, RIMBORSO sottrae
         if t.tipo == TipoTransazione.USCITA:
             stats[cat_nome] = stats.get(cat_nome, 0.0) + t.importo
         else:
             stats[cat_nome] = stats.get(cat_nome, 0.0) - t.importo
 
+    # Restituiamo solo categorie con valore positivo (le rimborsate totalmente spariscono)
     return [
         {"label": cat, "value": round(val, 2)} for cat, val in stats.items() if val > 0
     ]

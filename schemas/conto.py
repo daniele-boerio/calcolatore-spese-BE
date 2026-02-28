@@ -14,6 +14,7 @@ class ContoBase(BaseModel):
     frequenza_controllo: Optional[str] = None  # "SETTIMANALE" o "MENSILE"
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
+    default: bool = False
 
 
 class ContoCreate(ContoBase):
@@ -30,6 +31,7 @@ class ContoUpdate(BaseModel):
     frequenza_controllo: Optional[str] = None
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
+    default: bool = False
 
 
 class ContoOut(ContoBase):

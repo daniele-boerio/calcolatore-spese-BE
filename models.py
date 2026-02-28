@@ -72,6 +72,8 @@ class Conto(Base):
         order_by="desc(Transazione.data), desc(Transazione.creationDate), desc(Transazione.lastUpdate), Transazione.id",
     )
 
+    default = Column(Boolean, default=False)
+
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
         DateTime,
