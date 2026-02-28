@@ -6,6 +6,9 @@ from .sottocategoria import SottocategoriaCreate, SottocategoriaOut
 
 class CategoriaBase(BaseModel):
     nome: str
+    solo_entrata: bool = True
+    solo_uscita: bool = True
+    solo_rimborso: bool = True
 
 
 class CategoriaCreate(CategoriaBase):

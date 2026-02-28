@@ -4,6 +4,9 @@ from pydantic import BaseModel
 
 class SottocategoriaBase(BaseModel):
     nome: str
+    solo_entrata: bool = True
+    solo_uscita: bool = True
+    solo_rimborso: bool = True
 
 
 class SottocategoriaCreate(SottocategoriaBase):

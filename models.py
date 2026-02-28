@@ -89,6 +89,10 @@ class Categoria(Base):
     nome = Column(String, nullable=False)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
 
+    solo_entrata = Column(Boolean, default=True)
+    solo_uscita = Column(Boolean, default=True)
+    solo_rimborso = Column(Boolean, default=True)
+
     # Una categoria ha più sottocategorie
     sottocategorie = relationship(
         "Sottocategoria",
@@ -113,6 +117,10 @@ class Sottocategoria(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     # Si riferisce a una sola categoria
     categoria_id = Column(Integer, ForeignKey("categorie.id", ondelete="CASCADE"))
+
+    solo_entrata = Column(Boolean, default=True)
+    solo_uscita = Column(Boolean, default=True)
+    solo_rimborso = Column(Boolean, default=True)
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
