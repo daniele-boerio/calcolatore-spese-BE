@@ -3,7 +3,8 @@ from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Tag
-from schemas import TagCreate, TagOut, TagUpdate
+from schemas import TagCreate, TagOut, TagUpdate, TagFilters
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/tags", tags=["Tag"])
 
@@ -46,9 +47,16 @@ def create_tag(
 @router.get("", response_model=list[TagOut])
 def get_tags(
     db: Session = Depends(get_db),
+    filters: TagFilters = Depends(),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    return db.query(Tag).filter(Tag.user_id == current_user_id).all()
+    query = db.query(Tag).filter(Tag.user_id == current_user_id)
+    query = apply_filters_and_sort(
+        query,
+        Tag,
+        filters=filters,
+    )
+    return query.all()
 
 
 @router.put("/{tag_id}", response_model=TagOut)

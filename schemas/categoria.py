@@ -28,3 +28,11 @@ class CategoriaOut(CategoriaBase):
 
     class Config:
         from_attributes = True
+
+
+class CategoriaFilters(BaseModel):
+    sort_by: Optional[str] = "nome"
+    sort_order: Optional[str] = "desc"
+    solo_entrata: Optional[bool] = None
+    solo_uscita: Optional[bool] = None
+    solo_rimborso: Optional[bool] = None

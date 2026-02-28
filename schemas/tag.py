@@ -1,5 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
+from typing import Optional
 
 
 class TagBase(BaseModel):
@@ -21,3 +22,8 @@ class TagOut(TagBase):
 
     class Config:
         from_attributes = True
+
+
+class TagFilters(BaseModel):
+    sort_by: Optional[str] = "nome"
+    sort_order: Optional[str] = "desc"

@@ -1,9 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Categoria, Sottocategoria
-from schemas import CategoriaCreate, CategoriaOut, CategoriaUpdate
+from schemas import CategoriaCreate, CategoriaOut, CategoriaUpdate, CategoriaFilters
+from services import apply_filters_and_sort
 
 router = APIRouter(prefix="/categorie", tags=["Categorie"])
 
@@ -42,10 +44,36 @@ def create_categoria(
 @router.get("", response_model=list[CategoriaOut])
 def get_categorie(
     db: Session = Depends(get_db),
+    filters: CategoriaFilters = Depends(),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     # Fetch categories and their associated subcategories
-    return db.query(Categoria).filter(Categoria.user_id == current_user_id).all()
+    query = db.query(Categoria).filter(Categoria.user_id == current_user_id)
+    query = apply_filters_and_sort(
+        query,
+        Categoria,
+        filters=CategoriaFilters(),
+    )
+
+    if filters.solo_entrata:
+        query = query.filter(Categoria.solo_entrata)
+        # Filtriamo anche le sottocategorie caricate nella relazione
+        query = query.filter(
+            or_(Sottocategoria.id.is_(None), Sottocategoria.solo_entrata)
+        )
+
+    if filters.solo_uscita:
+        query = query.filter(Categoria.solo_uscita)
+        query = query.filter(
+            or_(Sottocategoria.id.is_(None), Sottocategoria.solo_uscita)
+        )
+
+    if filters.solo_rimborso:
+        query = query.filter(Categoria.solo_rimborso)
+        query = query.filter(
+            or_(Sottocategoria.id.is_(None), Sottocategoria.solo_rimborso)
+        )
+    return query.all()
 
 
 @router.put("/{categoria_id}", response_model=CategoriaOut)

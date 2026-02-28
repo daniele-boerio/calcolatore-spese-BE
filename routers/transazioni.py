@@ -172,7 +172,7 @@ def get_recent_transazioni(
     # Se sort_by non viene inviato, TransazioneFilters userà il default (es. data desc)
     if not filters:
         filters = TransazioneFilters()  # Default filters if none are provided
-        filters.sort_by = "creationDate"
+        filters.sort_by = "lastUpdate"
         filters.sort_order = "desc"
     query = apply_filters_and_sort(query, Transazione, filters)
 

@@ -7,15 +7,34 @@ from .user import (
     UserBudgetUpdate,
     UserResponse,
 )
-from .conto import ContoBase, ContoCreate, ContoUpdate, ContoOut, ContoFilters
-from .categoria import CategoriaBase, CategoriaCreate, CategoriaUpdate, CategoriaOut
+from .conto import (
+    ContoBase,
+    ContoCreate,
+    ContoUpdate,
+    ContoOut,
+    ContoFilters,
+)
+from .categoria import (
+    CategoriaBase,
+    CategoriaCreate,
+    CategoriaUpdate,
+    CategoriaOut,
+    CategoriaFilters,
+)
 from .sottocategoria import (
     SottocategoriaBase,
     SottocategoriaCreate,
     SottocategoriaUpdate,
     SottocategoriaOut,
+    SottocategoriaFilters,
 )
-from .tag import TagBase, TagCreate, TagUpdate, TagOut
+from .tag import (
+    TagBase,
+    TagCreate,
+    TagUpdate,
+    TagOut,
+    TagFilters,
+)
 from .transazione import (
     TransazioneBase,
     TransazioneCreate,

@@ -1,5 +1,6 @@
 from datetime import datetime
 from pydantic import BaseModel
+from typing import Optional
 
 
 class SottocategoriaBase(BaseModel):
@@ -26,3 +27,8 @@ class SottocategoriaOut(SottocategoriaBase):
 
     class Config:
         from_attributes = True
+
+
+class SottocategoriaFilters(BaseModel):
+    sort_by: Optional[str] = "nome"
+    sort_order: Optional[str] = "desc"
