@@ -36,6 +36,13 @@ def update_category_usage(
         )
 
 
+# Funzione di utilità per aggiornare le date dei conti
+def update_conto_usage(db: Session, conto_id: int):
+    now = datetime.now(timezone.utc)
+    if conto_id:
+        db.query(Conto).filter(Conto.id == conto_id).update({"lastImport": now})
+
+
 @router.post("", response_model=TransazioneOut)
 def create_transazione(
     transazione: TransazioneCreate,
@@ -88,6 +95,8 @@ def create_transazione(
         update_category_usage(
             db, transazione.categoria_id, transazione.sottocategoria_id
         )
+
+        update_conto_usage(db, transazione.conto_id)
 
         db.commit()
         db.refresh(new_trans)
@@ -203,6 +212,7 @@ def update_transazione(
 
         # E. AGGIORNAMENTO lastImport (usiamo i nuovi ID se sono cambiati)
         update_category_usage(db, db_trans.categoria_id, db_trans.sottocategoria_id)
+        update_conto_usage(db, db_trans.conto_id)
 
         db.commit()
         db.refresh(db_trans)

@@ -39,6 +39,7 @@ class ContoOut(ContoBase):
 
     creationDate: datetime
     lastUpdate: datetime
+    lastImport: datetime
 
     class Config:
         from_attributes = True
