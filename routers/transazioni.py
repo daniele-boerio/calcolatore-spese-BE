@@ -114,6 +114,10 @@ def get_recent_transazioni(
 
     # Applichiamo i filtri (se presenti) e l'ordinamento
     # Se sort_by non viene inviato, TransazioneFilters userà il default (es. data desc)
+    if not filters:
+        filters = TransazioneFilters()  # Default filters if none are provided
+        filters.sort_by = "creationDate"
+        filters.sort_order = "desc"
     query = apply_filters_and_sort(query, Transazione, filters)
 
     return query.limit(n).all()
@@ -126,6 +130,7 @@ def update_transazione(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
+    # 1. Recupero la transazione originale
     db_trans = (
         db.query(Transazione)
         .filter(
@@ -135,47 +140,54 @@ def update_transazione(
     )
 
     if not db_trans:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found"
-        )
+        raise HTTPException(status_code=404, detail="Transaction not found")
 
-    conto = (
+    # 2. Recupero il CONTO DI ORIGINE (quello vecchio)
+    conto_vecchio = (
         db.query(Conto)
         .filter(Conto.id == db_trans.conto_id, Conto.user_id == current_user_id)
         .first()
     )
 
-    if not conto:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND, detail="Associated account not found"
-        )
-
     try:
-        # A. REVERSION (Storno)
-        if db_trans.tipo == TipoTransazione.USCITA:
-            conto.saldo += db_trans.importo
-        else:
-            conto.saldo -= db_trans.importo
+        # A. STORNO dal vecchio conto
+        mod_vecchio = 1 if db_trans.tipo == TipoTransazione.USCITA else -1
+        if conto_vecchio:
+            conto_vecchio.saldo += db_trans.importo * mod_vecchio
 
-        # B. UPDATE DATA
+        # B. AGGIORNAMENTO DATI
         update_data = transazione_data.model_dump(exclude_unset=True)
         for key, value in update_data.items():
             setattr(db_trans, key, value)
 
-        # C. APPLY NEW BALANCE
-        if db_trans.tipo == TipoTransazione.USCITA:
-            conto.saldo -= db_trans.importo
-        else:
-            conto.saldo += db_trans.importo
+        # Sincronizziamo i cambiamenti temporanei per assicurarci che db_trans.conto_id sia aggiornato
+        db.flush()
+
+        # C. Recupero il CONTO DI DESTINAZIONE (potrebbe essere lo stesso o uno nuovo)
+        conto_nuovo = (
+            db.query(Conto)
+            .filter(Conto.id == db_trans.conto_id, Conto.user_id == current_user_id)
+            .first()
+        )
+
+        if not conto_nuovo:
+            raise HTTPException(
+                status_code=404, detail="New associated account not found"
+            )
+
+        # D. APPLICAZIONE al nuovo conto
+        mod_nuovo = -1 if db_trans.tipo == TipoTransazione.USCITA else 1
+        conto_nuovo.saldo += db_trans.importo * mod_nuovo
 
         db.commit()
         db.refresh(db_trans)
         return db_trans
-    except Exception:
+
+    except Exception as e:
         db.rollback()
         raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update transaction and balance",
+            status_code=500,
+            detail=f"Failed to update transaction: {str(e)}",
         )
 
 

@@ -8,6 +8,7 @@ from models import Conto, Transazione, User
 from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
 from schemas.transazione import TipoTransazione
 from services import apply_filters_and_sort
+import calendar
 
 router = APIRouter(prefix="/conti", tags=["Conti"])
 
@@ -128,10 +129,14 @@ def get_current_month_expenses(
             detail="User session invalid or account not found",
         )
 
+    # Calcolo del range del mese corrente
     today = date.today()
     first_day = today.replace(day=1)
+    # monthrange restituisce (giorno_settimana_inizio, numero_giorni_nel_mese)
+    _, last_day_num = calendar.monthrange(today.year, today.month)
+    last_day = today.replace(day=last_day_num)
 
-    # 1. Total OUTGOING
+    # 1. Totale USCITE nel mese
     total_out = (
         db.query(func.sum(Transazione.importo))
         .join(Conto)
@@ -139,12 +144,13 @@ def get_current_month_expenses(
             Conto.user_id == current_user_id,
             Transazione.tipo == TipoTransazione.USCITA,
             Transazione.data >= first_day,
+            Transazione.data <= last_day,  # Filtro per evitare mesi futuri
         )
         .scalar()
         or 0.0
     )
 
-    # 2. Total REFUNDS
+    # 2. Totale RIMBORSI nel mese
     total_refunds = (
         db.query(func.sum(Transazione.importo))
         .join(Conto)
@@ -152,6 +158,7 @@ def get_current_month_expenses(
             Conto.user_id == current_user_id,
             Transazione.tipo == TipoTransazione.RIMBORSO,
             Transazione.data >= first_day,
+            Transazione.data <= last_day,  # Filtro per evitare mesi futuri
         )
         .scalar()
         or 0.0
@@ -168,6 +175,7 @@ def get_current_month_expenses(
             "totalBudget": user.total_budget,
             "expenses": round(net_expenses, 2),
             "percentage": percentage,
+            "period": {"start": first_day, "end": last_day},
         }
     }
 
