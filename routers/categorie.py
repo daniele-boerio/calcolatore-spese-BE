@@ -52,7 +52,7 @@ def get_categorie(
     query = apply_filters_and_sort(
         query,
         Categoria,
-        filters=CategoriaFilters(),
+        filters=filters,
     )
 
     if filters.solo_entrata:
