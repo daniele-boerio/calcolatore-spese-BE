@@ -187,8 +187,8 @@ def get_transazioni(
 
 @router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
-    n: int,
-    filters: TransazioneFilters = Depends(),  # Aggiunto qui
+    n: int = None,
+    filters: TransazioneFilters = Depends(),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
@@ -202,7 +202,10 @@ def get_recent_transazioni(
         filters.sort_order = "desc"
     query = apply_filters_and_sort(query, Transazione, filters)
 
-    return query.limit(n).all()
+    if n:
+        query = query.limit(n)
+
+    return query.all()
 
 
 @router.put("/{transazione_id}", response_model=TransazioneOut)
