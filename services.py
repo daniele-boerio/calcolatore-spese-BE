@@ -196,7 +196,6 @@ def task_ricarica_automatica_conti():
 def apply_filters_and_sort(query: Query, model, filters: BaseModel):
     filter_data = filters.model_dump(exclude_unset=True)
     sort_by = filter_data.pop("sort_by", None)
-    sort_order = filter_data.pop("sort_order", "asc")
 
     for field, value in filter_data.items():
         if value is None:
@@ -237,10 +236,25 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
         elif hasattr(model, field):
             query = query.filter(getattr(model, field) == value)
 
-    # Ordinamento
-    if sort_by and hasattr(model, sort_by):
-        order_func = desc if sort_order.lower() == "desc" else asc
-        query = query.order_by(order_func(getattr(model, sort_by)))
+    # Ordinamento Multi-campo Avanzato
+    if sort_by:
+        sort_fields = sort_by if isinstance(sort_by, list) else [sort_by]
+        order_clauses = []
+
+        for item in sort_fields:
+            # Supportiamo il formato "campo:ordine" (es. "data:desc")
+            if ":" in item:
+                field, order = item.split(":", 1)
+            else:
+                field, order = item, "asc"  # Default se non specificato
+
+            if hasattr(model, field):
+                column = getattr(model, field)
+                clause = desc(column) if order.lower() == "desc" else asc(column)
+                order_clauses.append(clause)
+
+        if order_clauses:
+            query = query.order_by(*order_clauses)
     elif hasattr(model, "id"):
         query = query.order_by(desc(model.id))
 

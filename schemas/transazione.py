@@ -54,7 +54,7 @@ class TransazionePagination(BaseModel):
 
 
 class TransazioneFilters(BaseModel):
-    sort_by: Optional[str] = "data"
+    sort_by: Optional[list[str]] = Query(["data:desc", "id:desc"])
     sort_order: Optional[str] = "desc"
     importo_min: Optional[float] = None
     importo_max: Optional[float] = None
