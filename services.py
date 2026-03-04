@@ -207,11 +207,15 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
         if value is None:
             continue
 
-        # 1. Gestione LISTE (Clausola IN)
-        # Se il valore è una lista, usiamo .in_() per filtrare più ID contemporaneamente
-        if isinstance(value, list) and hasattr(model, field):
-            column = getattr(model, field)
-            query = query.filter(column.in_(value))
+        # 1. Gestione LISTE e SINGOLI VALORI (Clausola IN)
+        # Se il valore è una lista o un intero per i campi ID
+        if field in ["conto_id", "categoria_id", "sottocategoria_id", "tag_id"]:
+            if hasattr(model, field):
+                column = getattr(model, field)
+                # Normalizziamo a lista se è un singolo valore
+                if not isinstance(value, list):
+                    value = [value]
+                query = query.filter(column.in_(value))
 
         # 2. Gestione Range Importo (_min / _max)
         elif field.endswith("_min") and hasattr(model, field.replace("_min", "")):

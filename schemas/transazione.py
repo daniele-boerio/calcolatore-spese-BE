@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, Union
 from datetime import datetime, date
 from enum import Enum
 from fastapi import Query
@@ -62,8 +62,8 @@ class TransazioneFilters(BaseModel):
     data_fine: Optional[date] = None
     descrizione: Optional[str] = None
 
-    # Usiamo List[int] per permettere più valori
-    conto_id: Optional[list[int]] = None
-    categoria_id: Optional[list[int]] = None
-    sottocategoria_id: Optional[list[int]] = None
-    tag_id: Optional[list[int]] = None
+    # Usiamo Union[int, list[int]] per accettare sia singolo valore che array
+    conto_id: Optional[Union[int, list[int]]] = Query(None)
+    categoria_id: Optional[Union[int, list[int]]] = Query(None)
+    sottocategoria_id: Optional[Union[int, list[int]]] = Query(None)
+    tag_id: Optional[Union[int, list[int]]] = Query(None)
