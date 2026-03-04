@@ -64,6 +64,12 @@ class TransazioneFilters(BaseModel):
 
     # Usiamo List[int] per permettere più valori
     conto_id: Optional[list[int]] = None
-    categoria_id: Optional[list[int]] = None
-    sottocategoria_id: Optional[list[int]] = None
-    tag_id: Optional[list[int]] = None
+    categoria_id: Optional[list[int]] = Query(
+        None, description="Filter by one or more category IDs"
+    )
+    sottocategoria_id: Optional[list[int]] = Query(
+        None, description="Filter by one or more subcategory IDs"
+    )
+    tag_id: Optional[list[int]] = Query(
+        None, description="Filter by one or more tag IDs"
+    )
