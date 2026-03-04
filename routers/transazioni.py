@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, subqueryload
 from database import get_db
 import auth
 from schemas import (
@@ -85,8 +85,31 @@ def create_transazione(
 
     try:
         # 3. Creazione record
-        new_trans = Transazione(**transazione.model_dump(), user_id=current_user_id)
+        trans_data = transazione.model_dump()
+        # Inizializziamo importo_netto uguale all'importo (sarà ridotto se ci sono rimborsi futuri,
+        # o se questa è un rimborso, non tocca il proprio netto ma quello del padre)
+        trans_data["importo_netto"] = transazione.importo
+
+        new_trans = Transazione(**trans_data, user_id=current_user_id)
         db.add(new_trans)
+
+        # Se è un RIMBORSO, aggiorniamo l'importo_netto della transazione PADRE
+        if (
+            transazione.tipo == TipoTransazione.RIMBORSO
+            and transazione.parent_transaction_id
+        ):
+            # parent_exists l'abbiamo già recuperato nel check sopra, ma qui lo riprendiamo o usiamo quello
+            # Per sicurezza lo riprendiamo dalla sessione o usiamo la query di prima se l'avessimo salvata
+            parent_trans = (
+                db.query(Transazione)
+                .filter(Transazione.id == transazione.parent_transaction_id)
+                .first()
+            )
+            if parent_trans:
+                if parent_trans.importo_netto is None:
+                    parent_trans.importo_netto = parent_trans.importo
+                parent_trans.importo_netto -= transazione.importo
+                db.add(parent_trans)  # Segniamo come modified
 
         # 4. Aggiornamento Saldo (Balance Update)
         modificatore = -1 if transazione.tipo == TipoTransazione.USCITA else 1
@@ -132,7 +155,7 @@ def get_transazioni(
     total_entrata = (
         base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
         .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
-        .with_entities(func.sum(Transazione.importo))
+        .with_entities(func.sum(Transazione.importo_netto))
         .scalar()
         or 0.0
     )
@@ -141,7 +164,7 @@ def get_transazioni(
     total_uscita = (
         base_query.filter(Transazione.tipo == TipoTransazione.USCITA)
         .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
-        .with_entities(func.sum(Transazione.importo))
+        .with_entities(func.sum(Transazione.importo_netto))
         .scalar()
         or 0.0
     )
@@ -205,6 +228,9 @@ def update_transazione(
         .first()
     )
 
+    # Salviamo i vecchi valori per il calcolo delle differenze
+    old_importo = db_trans.importo
+
     try:
         # A. STORNO dal vecchio conto
         mod_vecchio = 1 if db_trans.tipo == TipoTransazione.USCITA else -1
@@ -218,6 +244,32 @@ def update_transazione(
 
         # Sincronizziamo i cambiamenti temporanei per assicurarci che db_trans.conto_id sia aggiornato
         db.flush()
+
+        # --- LOGICA AGGIORNAMENTO IMPORTO NETTO ---
+        new_importo = db_trans.importo
+        diff_importo = new_importo - old_importo
+
+        # Caso 1: Ho modificato l'importo della transazione stessa -> aggiorno il suo netto
+        # (se importo_netto è None, lo inizializzo)
+        if db_trans.importo_netto is None:
+            db_trans.importo_netto = new_importo
+        else:
+            # Se l'importo aumenta di 10, anche il netto aumenta di 10 (a parità di rimborsi)
+            db_trans.importo_netto += diff_importo
+
+        # Caso 2: Se questa transazione è un RIMBORSO, devo aggiornare il netto del PADRE
+        if db_trans.tipo == TipoTransazione.RIMBORSO and db_trans.parent_transaction_id:
+            parent = (
+                db.query(Transazione)
+                .filter(Transazione.id == db_trans.parent_transaction_id)
+                .first()
+            )
+            if parent:
+                if parent.importo_netto is None:
+                    parent.importo_netto = parent.importo
+                # Se il rimborso aumenta (diff > 0), il netto del padre diminuisce
+                parent.importo_netto -= diff_importo
+        # ------------------------------------------
 
         # C. Recupero il CONTO DI DESTINAZIONE (potrebbe essere lo stesso o uno nuovo)
         conto_nuovo = (
@@ -269,6 +321,20 @@ def delete_transazione(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Transaction not found"
         )
+
+    # Se sto cancellando un RIMBORSO, devo ripristinare l'importo netto del PADRE
+    # Nota: lo facciamo prima del commit finale, ma dopo aver verificato che la transazione esiste
+    if db_trans.tipo == TipoTransazione.RIMBORSO and db_trans.parent_transaction_id:
+        parent = (
+            db.query(Transazione)
+            .filter(Transazione.id == db_trans.parent_transaction_id)
+            .first()
+        )
+        if parent:
+            if parent.importo_netto is None:
+                parent.importo_netto = parent.importo
+            # Cancellando il rimborso, il padre "recupera" quel valore nel netto
+            parent.importo_netto += db_trans.importo
 
     conto = (
         db.query(Conto)

@@ -152,7 +152,7 @@ def get_current_month_expenses(
 
     # 1. Totale USCITE nel mese
     total_out = (
-        db.query(func.sum(Transazione.importo))
+        db.query(func.sum(Transazione.importo_netto))
         .join(Conto)
         .filter(
             Conto.user_id == current_user_id,
@@ -164,13 +164,12 @@ def get_current_month_expenses(
         or 0.0
     )
 
-    # 2. Totale RIMBORSI nel mese
-    total_refunds = (
-        db.query(func.sum(Transazione.importo))
+    total_in = (
+        db.query(func.sum(Transazione.importo_netto))
         .join(Conto)
         .filter(
             Conto.user_id == current_user_id,
-            Transazione.tipo == TipoTransazione.RIMBORSO,
+            Transazione.tipo == TipoTransazione.ENTRATA,
             Transazione.data >= first_day,
             Transazione.data <= last_day,  # Filtro per evitare mesi futuri
         )
@@ -178,7 +177,7 @@ def get_current_month_expenses(
         or 0.0
     )
 
-    net_expenses = max(0, total_out - total_refunds)
+    net_expenses = total_out - total_in
 
     percentage = None
     if user.total_budget and user.total_budget > 0:

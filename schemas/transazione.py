@@ -38,6 +38,7 @@ class TransazioneOut(TransazioneBase):
     id: int
     creationDate: datetime
     lastUpdate: datetime
+    importo_netto: float
 
     class Config:
         from_attributes = True

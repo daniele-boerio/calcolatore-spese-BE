@@ -8,7 +8,7 @@ from sqlalchemy import (
     Boolean,
     Date,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, backref
 from datetime import datetime, timezone
 from database import Base
 
@@ -175,6 +175,14 @@ class Transazione(Base):
     parent_transaction_id = Column(
         Integer, ForeignKey("transazioni.id", ondelete="CASCADE"), nullable=True
     )
+
+    rimborsi = relationship(
+        "Transazione",
+        backref=backref("parent_transaction", remote_side=[id]),
+        cascade="all, delete-orphan",
+    )
+
+    importo_netto = Column(Float, nullable=True)  # Denormalizzato: importo - rimborsi
 
     # Relazioni
     categoria = relationship(
