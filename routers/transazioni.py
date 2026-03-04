@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy.orm import Session, subqueryload
+from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from schemas import (
@@ -50,7 +50,7 @@ def create_transazione(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    # 1. Recuperiamo il conto (security check + balance update)
+    # 1. Recuperiamo il conto
     conto = (
         db.query(Conto)
         .filter(Conto.id == transazione.conto_id, Conto.user_id == current_user_id)
@@ -63,12 +63,15 @@ def create_transazione(
             detail="Account not found or not authorized",
         )
 
+    # Inizializziamo variabili per il padre
+    parent_trans = None
+
     # 2. Controllo RIMBORSO (Refund)
     if (
         transazione.tipo == TipoTransazione.RIMBORSO
         and transazione.parent_transaction_id
     ):
-        parent_exists = (
+        parent_trans = (
             db.query(Transazione)
             .filter(
                 Transazione.id == transazione.parent_transaction_id,
@@ -77,7 +80,7 @@ def create_transazione(
             .first()
         )
 
-        if not parent_exists:
+        if not parent_trans:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="The original transaction for this refund does not exist",
@@ -86,47 +89,47 @@ def create_transazione(
     try:
         # 3. Creazione record
         trans_data = transazione.model_dump()
-        # Inizializziamo importo_netto uguale all'importo (sarà ridotto se ci sono rimborsi futuri,
-        # o se questa è un rimborso, non tocca il proprio netto ma quello del padre)
+
+        # --- LOGICA RICHIESTA: Overwrite categoria e sottocategoria se è un rimborso ---
+        if parent_trans:
+            trans_data["categoria_id"] = parent_trans.categoria_id
+            trans_data["sottocategoria_id"] = parent_trans.sottocategoria_id
+            trans_data["tag_id"] = parent_trans.tag_id
+
+        # Inizializziamo importo_netto
         trans_data["importo_netto"] = transazione.importo
 
         new_trans = Transazione(**trans_data, user_id=current_user_id)
         db.add(new_trans)
 
         # Se è un RIMBORSO, aggiorniamo l'importo_netto della transazione PADRE
-        if (
-            transazione.tipo == TipoTransazione.RIMBORSO
-            and transazione.parent_transaction_id
-        ):
-            # parent_exists l'abbiamo già recuperato nel check sopra, ma qui lo riprendiamo o usiamo quello
-            # Per sicurezza lo riprendiamo dalla sessione o usiamo la query di prima se l'avessimo salvata
-            parent_trans = (
-                db.query(Transazione)
-                .filter(Transazione.id == transazione.parent_transaction_id)
-                .first()
-            )
-            if parent_trans:
-                if parent_trans.importo_netto is None:
-                    parent_trans.importo_netto = parent_trans.importo
-                parent_trans.importo_netto -= transazione.importo
-                db.add(parent_trans)  # Segniamo come modified
+        if parent_trans:
+            if parent_trans.importo_netto is None:
+                parent_trans.importo_netto = parent_trans.importo
+
+            parent_trans.importo_netto -= transazione.importo
+            # Non serve db.add(parent_trans) se l'oggetto arriva dalla query nella stessa sessione,
+            # ma male non fa.
 
         # 4. Aggiornamento Saldo (Balance Update)
+        # Il rimborso aumenta il saldo del conto (come un'entrata)
         modificatore = -1 if transazione.tipo == TipoTransazione.USCITA else 1
         conto.saldo += transazione.importo * modificatore
 
-        # AGGIORNAMENTO lastImport
-        update_category_usage(
-            db, transazione.categoria_id, transazione.sottocategoria_id
-        )
+        # AGGIORNAMENTO lastImport / Usage
+        # Usiamo i valori finali (quelli del padre se rimborso, o quelli inviati se normale)
+        update_category_usage(db, new_trans.categoria_id, new_trans.sottocategoria_id)
 
         update_conto_usage(db, transazione.conto_id)
 
         db.commit()
         db.refresh(new_trans)
         return new_trans
-    except Exception:
+
+    except Exception as e:
         db.rollback()
+        # Log dell'errore per debugging interno
+        print(f"Error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the transaction",
@@ -195,11 +198,6 @@ def get_recent_transazioni(
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
 
     # Applichiamo i filtri (se presenti) e l'ordinamento
-    # Se sort_by non viene inviato, TransazioneFilters userà il default (es. data desc)
-    if not filters:
-        filters = TransazioneFilters()  # Default filters if none are provided
-        filters.sort_by = "lastUpdate"
-        filters.sort_order = "desc"
     query = apply_filters_and_sort(query, Transazione, filters)
 
     if n:
