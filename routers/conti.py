@@ -177,7 +177,7 @@ def get_current_month_expenses(
         or 0.0
     )
 
-    net_expenses = total_out - total_in
+    net_expenses = total_in - total_out
 
     percentage = None
     if user.total_budget and user.total_budget > 0:
