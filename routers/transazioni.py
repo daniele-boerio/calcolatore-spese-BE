@@ -155,16 +155,19 @@ def get_transazioni(
     total_entrata = (
         base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
         .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
-        .with_entities(func.sum(Transazione.importo_netto))
+        .with_entities(func.sum(Transazione.importo))
         .scalar()
         or 0.0
     )
 
     # 4. Calcolo Totale Uscite
     total_uscita = (
-        base_query.filter(Transazione.tipo == TipoTransazione.USCITA)
+        base_query.filter(
+            (Transazione.tipo == TipoTransazione.USCITA)
+            | (Transazione.tipo == TipoTransazione.RIMBORSO)
+        )
         .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
-        .with_entities(func.sum(Transazione.importo_netto))
+        .with_entities(func.sum(Transazione.importo))
         .scalar()
         or 0.0
     )
