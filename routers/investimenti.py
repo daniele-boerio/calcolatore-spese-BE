@@ -20,7 +20,7 @@ router = APIRouter(prefix="/investimenti", tags=["Investimenti"])
 # 1. GET ALL - All user investments
 @router.get("", response_model=list[InvestimentoOut])
 def get_investimenti(
-    filters: InvestimentoFilters = Depends(),
+    filters: InvestimentoFilters = Depends(InvestimentoFilters),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):

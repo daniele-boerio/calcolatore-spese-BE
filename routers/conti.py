@@ -47,7 +47,7 @@ def create_conto(
 
 @router.get("", response_model=list[ContoOut])
 def get_conti(
-    filters: ContoFilters = Depends(),
+    filters: ContoFilters = Depends(ContoFilters),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):

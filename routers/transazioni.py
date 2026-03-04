@@ -140,7 +140,7 @@ def create_transazione(
 def get_transazioni(
     page: int = 1,
     size: int = 10,
-    filters: TransazioneFilters = Depends(),
+    filters: TransazioneFilters = Depends(TransazioneFilters),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
@@ -191,7 +191,7 @@ def get_transazioni(
 @router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     n: int = None,
-    filters: TransazioneFilters = Depends(),
+    filters: TransazioneFilters = Depends(TransazioneFilters),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):

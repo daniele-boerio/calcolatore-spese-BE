@@ -45,7 +45,7 @@ def create_ricorrenza(
 
 @router.get("", response_model=List[RicorrenzaOut])
 def get_ricorrenze(
-    filters: RicorrenzaFilters = Depends(),
+    filters: RicorrenzaFilters = Depends(RicorrenzaFilters),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
