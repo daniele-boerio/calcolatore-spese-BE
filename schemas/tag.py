@@ -1,4 +1,5 @@
 from datetime import datetime
+from fastapi.params import Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -25,5 +26,4 @@ class TagOut(TagBase):
 
 
 class TagFilters(BaseModel):
-    sort_by: Optional[str] = "nome"
-    sort_order: Optional[str] = "desc"
+    sort_by: Optional[list[str]] = Query(["nome:asc"])

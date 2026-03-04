@@ -1,4 +1,5 @@
 from datetime import datetime
+from fastapi import Query
 from pydantic import BaseModel
 from typing import Optional
 
@@ -30,5 +31,4 @@ class SottocategoriaOut(SottocategoriaBase):
 
 
 class SottocategoriaFilters(BaseModel):
-    sort_by: Optional[str] = "nome"
-    sort_order: Optional[str] = "desc"
+    sort_by: Optional[list[str]] = Query(["nome:asc"])

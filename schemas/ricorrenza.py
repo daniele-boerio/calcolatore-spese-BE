@@ -46,8 +46,7 @@ class RicorrenzaOut(RicorrenzaBase):
 
 
 class RicorrenzaFilters(BaseModel):
-    sort_by: Optional[str] = "prossima_esecuzione"
-    sort_order: Optional[str] = "asc"
+    sort_by: Optional[list[str]] = Query(["prossima_esecuzione:asc"])
     nome: Optional[str] = None
     tipo: Optional[str] = None
     # Range per l'importo

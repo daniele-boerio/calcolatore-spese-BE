@@ -1,6 +1,7 @@
 from datetime import date
 from pydantic import BaseModel
 from typing import Optional
+from fastapi import Query
 
 # --- SCHEMI STORICO (Operazioni di Acquisto/Vendita) ---
 
@@ -64,8 +65,7 @@ class InvestimentoOut(InvestimentoBase):
 
 
 class InvestimentoFilters(BaseModel):
-    sort_by: Optional[str] = "nome_titolo"
-    sort_order: Optional[str] = "asc"
+    sort_by: Optional[list[str]] = Query(["nome_titolo:asc"])
     isin: Optional[str] = None
     ticker: Optional[str] = None
     nome_titolo: Optional[str] = None

@@ -1,4 +1,5 @@
 from datetime import datetime
+from fastapi.params import Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -46,8 +47,7 @@ class ContoOut(ContoBase):
 
 
 class ContoFilters(BaseModel):
-    sort_by: Optional[str] = "nome"
-    sort_order: Optional[str] = "asc"
+    sort_by: Optional[list[str]] = Query(["nome:asc"])
     nome: Optional[str] = None
     saldo_min: Optional[float] = None
     saldo_max: Optional[float] = None

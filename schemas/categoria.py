@@ -1,4 +1,5 @@
 from datetime import datetime
+from fastapi import Query
 from pydantic import BaseModel
 from typing import List, Optional
 from .sottocategoria import SottocategoriaCreate, SottocategoriaOut
@@ -31,8 +32,7 @@ class CategoriaOut(CategoriaBase):
 
 
 class CategoriaFilters(BaseModel):
-    sort_by: Optional[str] = "nome"
-    sort_order: Optional[str] = "desc"
+    sort_by: Optional[list[str]] = Query(["nome:asc"])
     solo_entrata: Optional[bool] = None
     solo_uscita: Optional[bool] = None
     solo_rimborso: Optional[bool] = None
