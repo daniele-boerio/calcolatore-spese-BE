@@ -62,8 +62,8 @@ class TransazioneFilters(BaseModel):
     data_fine: Optional[date] = None
     descrizione: Optional[str] = None
 
-    # Usiamo List[int] e Query(None) per permettere più valori
-    conto_id: Optional[list[int]] = Query(None)
-    categoria_id: Optional[list[int]] = Query(None)
-    sottocategoria_id: Optional[list[int]] = Query(None)
-    tag_id: Optional[list[int]] = Query(None)
+    # Usiamo List[int] per permettere più valori
+    conto_id: Optional[list[int]] = None
+    categoria_id: Optional[list[int]] = None
+    sottocategoria_id: Optional[list[int]] = None
+    tag_id: Optional[list[int]] = None

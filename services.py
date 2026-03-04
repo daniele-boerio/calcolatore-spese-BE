@@ -197,6 +197,10 @@ def apply_filters_and_sort(query: Query, model, filters: BaseModel):
     # Usiamo exclude_none=True invece di exclude_unset=True per assicurarci di
     # includere i valori di default (es. sort_by) e i parametri passati.
     filter_data = filters.model_dump(exclude_none=True)
+
+    # DEBUG LOG
+    print(f"DEBUG FILTERS: {filter_data}")
+
     sort_by = filter_data.pop("sort_by", None)
 
     for field, value in filter_data.items():
