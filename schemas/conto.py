@@ -1,5 +1,5 @@
 from datetime import datetime
-from fastapi.params import Query
+from fastapi import Query
 from pydantic import BaseModel
 from typing import Optional
 from datetime import date
@@ -46,9 +46,23 @@ class ContoOut(ContoBase):
         from_attributes = True
 
 
-class ContoFilters(BaseModel):
-    sort_by: Optional[list[str]] = Query(["nome:asc"])
-    nome: Optional[str] = None
-    saldo_min: Optional[float] = None
-    saldo_max: Optional[float] = None
-    ricarica_automatica: Optional[bool] = None
+class ContoFilters:
+    def __init__(
+        self,
+        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
+        sort_by: Optional[list[str]] = Query(["nome:asc"]),
+        nome: Optional[str] = Query(None),
+        saldo_min: Optional[float] = Query(None),
+        saldo_max: Optional[float] = Query(None),
+        ricarica_automatica: Optional[bool] = Query(None),
+    ):
+        self.sort_by = sort_by
+        self.nome = nome
+        self.saldo_min = saldo_min
+        self.saldo_max = saldo_max
+        self.ricarica_automatica = ricarica_automatica
+
+    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
+    def model_dump(self):
+        # Restituisce un dizionario ignorando i valori None
+        return {k: v for k, v in self.__dict__.items() if v is not None}

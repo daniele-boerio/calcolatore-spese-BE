@@ -64,15 +64,34 @@ class InvestimentoOut(InvestimentoBase):
         from_attributes = True
 
 
-class InvestimentoFilters(BaseModel):
-    sort_by: Optional[list[str]] = Query(["nome_titolo:asc"])
-    isin: Optional[str] = None
-    ticker: Optional[str] = None
-    nome_titolo: Optional[str] = None
-    # Range per quantità e valore
-    quantita_min: Optional[float] = None
-    quantita_max: Optional[float] = None
-    valore_attuale_min: Optional[float] = None
-    valore_attuale_max: Optional[float] = None
-    data_inizio: Optional[date] = None
-    data_fine: Optional[date] = None
+class InvestimentoFilters:
+    def __init__(
+        self,
+        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
+        sort_by: Optional[list[str]] = Query(["nome_titolo:asc"]),
+        isin: Optional[str] = Query(None),
+        ticker: Optional[str] = Query(None),
+        nome_titolo: Optional[str] = Query(None),
+        # Range per quantità e valore
+        quantita_min: Optional[float] = Query(None),
+        quantita_max: Optional[float] = Query(None),
+        valore_attuale_min: Optional[float] = Query(None),
+        valore_attuale_max: Optional[float] = Query(None),
+        data_inizio: Optional[date] = Query(None),
+        data_fine: Optional[date] = Query(None),
+    ):
+        self.sort_by = sort_by
+        self.isin = isin
+        self.ticker = ticker
+        self.nome_titolo = nome_titolo
+        self.quantita_min = quantita_min
+        self.quantita_max = quantita_max
+        self.valore_attuale_min = valore_attuale_min
+        self.valore_attuale_max = valore_attuale_max
+        self.data_inizio = data_inizio
+        self.data_fine = data_fine
+
+    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
+    def model_dump(self):
+        # Restituisce un dizionario ignorando i valori None
+        return {k: v for k, v in self.__dict__.items() if v is not None}

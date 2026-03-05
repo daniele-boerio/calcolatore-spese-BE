@@ -47,7 +47,7 @@ def create_tag(
 @router.get("", response_model=list[TagOut])
 def get_tags(
     db: Session = Depends(get_db),
-    filters: TagFilters = Depends(TagFilters),
+    filters: TagFilters = Depends(),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     query = db.query(Tag).filter(Tag.user_id == current_user_id)

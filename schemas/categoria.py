@@ -31,8 +31,21 @@ class CategoriaOut(CategoriaBase):
         from_attributes = True
 
 
-class CategoriaFilters(BaseModel):
-    sort_by: Optional[list[str]] = Query(["nome:asc"])
-    solo_entrata: Optional[bool] = None
-    solo_uscita: Optional[bool] = None
-    solo_rimborso: Optional[bool] = None
+class CategoriaFilters:
+    def __init__(
+        self,
+        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
+        sort_by: Optional[list[str]] = Query(["nome:asc"]),
+        solo_entrata: Optional[bool] = Query(None),
+        solo_uscita: Optional[bool] = Query(None),
+        solo_rimborso: Optional[bool] = Query(None),
+    ):
+        self.sort_by = sort_by
+        self.solo_entrata = solo_entrata
+        self.solo_uscita = solo_uscita
+        self.solo_rimborso = solo_rimborso
+
+    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
+    def model_dump(self):
+        # Restituisce un dizionario ignorando i valori None
+        return {k: v for k, v in self.__dict__.items() if v is not None}

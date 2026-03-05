@@ -44,7 +44,7 @@ def create_categoria(
 @router.get("", response_model=list[CategoriaOut])
 def get_categorie(
     db: Session = Depends(get_db),
-    filters: CategoriaFilters = Depends(CategoriaFilters),
+    filters: CategoriaFilters = Depends(),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     # Fetch categories and their associated subcategories
