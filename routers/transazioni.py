@@ -192,7 +192,7 @@ def get_transazioni(
 
 @router.get("/", response_model=list[TransazioneOut])
 def get_recent_transazioni(
-    filters: Annotated[TransazioneFilters, Depends()],
+    filters: TransazioneFilters = Depends(),
     n: int = None,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
