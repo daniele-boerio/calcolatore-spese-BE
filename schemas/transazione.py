@@ -66,7 +66,7 @@ class TransazioneFilters(BaseModel):
     conto_id: Optional[list[int]] = Query(
         None, description="Filter by one or more account IDs"
     )
-    categoria_id: Optional[list[str]] = Query(
+    categoria_id: Optional[list[int]] = Query(
         None, description="Filter by one or more category IDs", alias="categoria_id"
     )
     sottocategoria_id: Optional[list[int]] = Query(
