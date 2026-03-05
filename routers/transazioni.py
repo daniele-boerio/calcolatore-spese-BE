@@ -190,7 +190,7 @@ def get_transazioni(
     }
 
 
-@router.get("/", response_model=list[TransazioneOut])
+@router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     filters: TransazioneFilters = Depends(),
     n: int = None,
@@ -199,7 +199,8 @@ def get_recent_transazioni(
 ):
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
 
-    print(f"DEBUG: Received filters: {filters}")
+    # Questo print ora stamperà l'oggetto correttamente popolato dall'URL!
+    print(f"DEBUG: Received filters: {filters.__dict__}")
 
     query = apply_filters_and_sort(query, Transazione, filters)
 

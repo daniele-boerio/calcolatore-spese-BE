@@ -53,19 +53,35 @@ class TransazionePagination(BaseModel):
     data: list[TransazioneOut]  # La lista effettiva delle transazioni
 
 
-class TransazioneFilters(BaseModel):
-    # Assegniamo un default a ogni campo!
-    sort_by: Optional[list[str]] = Query(["data:desc", "id:desc"])
+class TransazioneFilters:
+    def __init__(
+        self,
+        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
+        sort_by: Optional[list[str]] = Query(["data:desc", "id:desc"]),
+        importo_min: Optional[float] = Query(None),
+        importo_max: Optional[float] = Query(None),
+        tipo: Optional[str] = Query(None),
+        data_inizio: Optional[date] = Query(None),
+        data_fine: Optional[date] = Query(None),
+        descrizione: Optional[str] = Query(None),
+        conto_id: Optional[list[int]] = Query(None),
+        categoria_id: Optional[list[int]] = Query(None),
+        sottocategoria_id: Optional[list[int]] = Query(None),
+        tag_id: Optional[list[int]] = Query(None),
+    ):
+        self.sort_by = sort_by
+        self.importo_min = importo_min
+        self.importo_max = importo_max
+        self.tipo = tipo
+        self.data_inizio = data_inizio
+        self.data_fine = data_fine
+        self.descrizione = descrizione
+        self.conto_id = conto_id
+        self.categoria_id = categoria_id
+        self.sottocategoria_id = sottocategoria_id
+        self.tag_id = tag_id
 
-    importo_min: Optional[float] = None
-    importo_max: Optional[float] = None
-    tipo: Optional[str] = None
-    data_inizio: Optional[date] = None
-    data_fine: Optional[date] = None
-    descrizione: Optional[str] = None
-
-    # Per le liste, Query(None) è obbligatorio quando usi Depends()
-    conto_id: Optional[list[int]] = Query(None)
-    categoria_id: Optional[list[int]] = Query(None)
-    sottocategoria_id: Optional[list[int]] = Query(None)
-    tag_id: Optional[list[int]] = Query(None)
+    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
+    def model_dump(self, exclude_unset=True, exclude_none=True):
+        # Restituisce un dizionario ignorando i valori None
+        return {k: v for k, v in self.__dict__.items() if v is not None}
