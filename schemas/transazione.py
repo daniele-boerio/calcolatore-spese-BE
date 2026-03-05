@@ -54,16 +54,18 @@ class TransazionePagination(BaseModel):
 
 
 class TransazioneFilters(BaseModel):
-    sort_by: Optional[list[str]]
-    importo_min: Optional[float]
-    importo_max: Optional[float]
-    tipo: Optional[str]
-    data_inizio: Optional[date]
-    data_fine: Optional[date]
-    descrizione: Optional[str]
+    # Assegniamo un default a ogni campo!
+    sort_by: Optional[list[str]] = Query(["data:desc", "id:desc"])
 
-    # Usiamo List[int] per permettere più valori
-    conto_id: Optional[list[int]]
-    categoria_id: Optional[list[int]]
-    sottocategoria_id: Optional[list[int]]
-    tag_id: Optional[list[int]]
+    importo_min: Optional[float] = None
+    importo_max: Optional[float] = None
+    tipo: Optional[str] = None
+    data_inizio: Optional[date] = None
+    data_fine: Optional[date] = None
+    descrizione: Optional[str] = None
+
+    # Per le liste, Query(None) è obbligatorio quando usi Depends()
+    conto_id: Optional[list[int]] = Query(None)
+    categoria_id: Optional[list[int]] = Query(None)
+    sottocategoria_id: Optional[list[int]] = Query(None)
+    tag_id: Optional[list[int]] = Query(None)
