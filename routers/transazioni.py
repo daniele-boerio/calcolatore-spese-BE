@@ -1,6 +1,4 @@
-from typing import Annotated
-
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
@@ -198,9 +196,6 @@ def get_recent_transazioni(
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
-
-    # Questo print ora stamperà l'oggetto correttamente popolato dall'URL!
-    print(f"DEBUG: Received filters: {filters.__dict__}")
 
     query = apply_filters_and_sort(query, Transazione, filters)
 

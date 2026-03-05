@@ -82,6 +82,6 @@ class TransazioneFilters:
         self.tag_id = tag_id
 
     # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
-    def model_dump(self, exclude_unset=True, exclude_none=True):
+    def model_dump(self):
         # Restituisce un dizionario ignorando i valori None
         return {k: v for k, v in self.__dict__.items() if v is not None}
