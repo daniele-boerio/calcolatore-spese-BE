@@ -1,3 +1,5 @@
+from typing import Annotated
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -191,7 +193,7 @@ def get_transazioni(
 @router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     n: int = None,
-    filters: TransazioneFilters = Depends(),
+    filters: Annotated[TransazioneFilters, Depends()] = None,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
