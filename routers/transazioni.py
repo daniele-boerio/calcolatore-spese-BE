@@ -190,10 +190,10 @@ def get_transazioni(
     }
 
 
-@router.get("", response_model=list[TransazioneOut])
+@router.get("/", response_model=list[TransazioneOut])
 def get_recent_transazioni(
     # 1. Senza default (deve stare per forza all'inizio)
-    filters: Annotated[TransazioneFilters, Query()],
+    filters: Annotated[TransazioneFilters, Depends()],
     # 2. Con default (opzionali e Depends)
     n: int = None,
     db: Session = Depends(get_db),
