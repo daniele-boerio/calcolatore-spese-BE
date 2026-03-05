@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, Union
+from typing import Optional, list
 from datetime import datetime, date
 from enum import Enum
 from fastapi import Query
@@ -63,7 +63,9 @@ class TransazioneFilters(BaseModel):
     descrizione: Optional[str] = None
 
     # Usiamo List[int] per permettere più valori
-    conto_id: Optional[list[int]] = None
+    conto_id: Optional[list[int]] = Query(
+        None, description="Filter by one or more account IDs"
+    )
     categoria_id: Optional[list[int]] = Query(
         None, description="Filter by one or more category IDs"
     )
