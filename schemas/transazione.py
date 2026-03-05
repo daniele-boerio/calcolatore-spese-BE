@@ -54,24 +54,16 @@ class TransazionePagination(BaseModel):
 
 
 class TransazioneFilters(BaseModel):
-    sort_by: Optional[list[str]] = Query(["data:desc", "id:desc"])
-    importo_min: Optional[float] = None
-    importo_max: Optional[float] = None
-    tipo: Optional[str] = None
-    data_inizio: Optional[date] = None
-    data_fine: Optional[date] = None
-    descrizione: Optional[str] = None
+    sort_by: Optional[list[str]]
+    importo_min: Optional[float]
+    importo_max: Optional[float]
+    tipo: Optional[str]
+    data_inizio: Optional[date]
+    data_fine: Optional[date]
+    descrizione: Optional[str]
 
     # Usiamo List[int] per permettere più valori
-    conto_id: Optional[list[int]] = Query(
-        None, description="Filter by one or more account IDs"
-    )
-    categoria_id: Optional[list[int]] = Query(
-        None, description="Filter by one or more category IDs", alias="categoria_id"
-    )
-    sottocategoria_id: Optional[list[int]] = Query(
-        None, description="Filter by one or more subcategory IDs"
-    )
-    tag_id: Optional[list[int]] = Query(
-        None, description="Filter by one or more tag IDs"
-    )
+    conto_id: Optional[list[int]]
+    categoria_id: Optional[list[int]]
+    sottocategoria_id: Optional[list[int]]
+    tag_id: Optional[list[int]]
