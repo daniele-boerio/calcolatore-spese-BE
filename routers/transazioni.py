@@ -197,6 +197,7 @@ def get_recent_transazioni(
 ):
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
 
+    print(f"DEBUG: Received filters: {filters}")
     # Applichiamo i filtri (se presenti) e l'ordinamento
     query = apply_filters_and_sort(query, Transazione, filters)
 
