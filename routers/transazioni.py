@@ -192,15 +192,17 @@ def get_transazioni(
 
 @router.get("", response_model=list[TransazioneOut])
 def get_recent_transazioni(
+    # 1. Senza default (deve stare per forza all'inizio)
+    filters: Annotated[TransazioneFilters, Query()],
+    # 2. Con default (opzionali e Depends)
     n: int = None,
-    filters: Annotated[TransazioneFilters, Query()] = None,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
     query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
 
     print(f"DEBUG: Received filters: {filters}")
-    # Applichiamo i filtri (se presenti) e l'ordinamento
+
     query = apply_filters_and_sort(query, Transazione, filters)
 
     if n:
