@@ -84,7 +84,7 @@ class TransazioneFilters:
         data_fine: Optional[date] = Query(None),
         descrizione: Optional[str] = Query(None),
         conto_id: Optional[List[int]] = Query(None),
-        categoria_id: Optional[List[List[int]]] = Query(
+        categoria_id: Optional[List[int]] = Query(
             None
         ),  # FastAPI gestisce meglio List se non forzate
         sottocategoria_id: Optional[List[int]] = Query(None),
