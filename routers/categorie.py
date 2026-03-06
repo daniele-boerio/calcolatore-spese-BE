@@ -6,6 +6,7 @@ import auth
 from models import Categoria, Sottocategoria
 from schemas import CategoriaCreate, CategoriaOut, CategoriaUpdate, CategoriaFilters
 from services import apply_filters_and_sort
+from sqlalchemy.orm import contains_eager
 
 router = APIRouter(prefix="/categorie", tags=["Categorie"])
 
@@ -47,17 +48,17 @@ def get_categorie(
     filters: CategoriaFilters = Depends(),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    # Fetch categories and their associated subcategories
-    query = db.query(Categoria).filter(Categoria.user_id == current_user_id)
-    query = apply_filters_and_sort(
-        query,
-        Categoria,
-        filters=filters,
+    # 1. Iniziamo con un JOIN esplicito tra Categoria e Sottocategoria
+    # Usiamo outerjoin per non perdere le categorie che non hanno sottocategorie
+    query = (
+        db.query(Categoria)
+        .outerjoin(Categoria.sottocategorie)
+        .filter(Categoria.user_id == current_user_id)
     )
 
+    # 2. Applichiamo i filtri principali (che ora funzionano su entrambi)
     if filters.solo_entrata:
         query = query.filter(Categoria.solo_entrata)
-        # Filtriamo anche le sottocategorie caricate nella relazione
         query = query.filter(
             or_(Sottocategoria.id.is_(None), Sottocategoria.solo_entrata)
         )
@@ -73,6 +74,18 @@ def get_categorie(
         query = query.filter(
             or_(Sottocategoria.id.is_(None), Sottocategoria.solo_rimborso)
         )
+
+    # 3. Applichiamo la funzione di sorting/filtering generica
+    query = apply_filters_and_sort(query, Categoria, filters=filters)
+
+    # 4. FONDAMENTALE: Ordiniamo anche le sottocategorie (es. per nome o data)
+    # Se non specifichi questo, apply_filters_and_sort ordina solo le categorie
+    query = query.order_by(Categoria.nome, Sottocategoria.nome)
+
+    # 5. Diciamo a SQLAlchemy di popolare la relazione .sottocategorie
+    # usando i risultati di questa query filtrata e ordinata
+    query = query.options(contains_eager(Categoria.sottocategorie))
+
     return query.all()
 
 
