@@ -173,10 +173,11 @@ def task_ricarica_automatica_conti():
                 # 2. Crea la transazione di entrata nel conto target
                 entrata = models.Transazione(
                     importo=importo_ricarica,
-                    tipo="ENTRATA",
+                    tipo="RIMBORSO",
                     descrizione=f"Ricarica automatica da {conto_sorgente.nome}",
                     data=datetime.now(),
                     conto_id=conto.id,
+                    parent_transaction_id=uscita.id,
                 )
 
                 # Aggiorna i saldi

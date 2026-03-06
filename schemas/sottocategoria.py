@@ -8,18 +8,16 @@ class SottocategoriaBase(BaseModel):
     nome: str
     solo_entrata: bool = True
     solo_uscita: bool = True
-    solo_rimborso: bool = True
 
 
 class SottocategoriaCreate(SottocategoriaBase):
-    categoria_id: int  # Spesso serve passarlo esplicitamente in creazione
+    categoria_id: int
 
 
 class SottocategoriaUpdate(SottocategoriaBase):
     nome: Optional[str] = None
     solo_entrata: Optional[bool] = None
     solo_uscita: Optional[bool] = None
-    solo_rimborso: Optional[bool] = None
 
 
 class SottocategoriaOut(SottocategoriaBase):

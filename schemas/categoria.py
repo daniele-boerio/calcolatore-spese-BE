@@ -9,7 +9,6 @@ class CategoriaBase(BaseModel):
     nome: str
     solo_entrata: bool = True
     solo_uscita: bool = True
-    solo_rimborso: bool = True
 
 
 class CategoriaCreate(CategoriaBase):
@@ -20,7 +19,6 @@ class CategoriaUpdate(BaseModel):  # Rendo i campi opzionali per la PATCH
     nome: Optional[str] = None
     solo_entrata: Optional[bool] = None
     solo_uscita: Optional[bool] = None
-    solo_rimborso: Optional[bool] = None
 
 
 class CategoriaOut(CategoriaBase):
@@ -42,13 +40,11 @@ class CategoriaFilters:
         nome: Optional[str] = Query(None),
         solo_entrata: Optional[bool] = Query(None),
         solo_uscita: Optional[bool] = Query(None),
-        solo_rimborso: Optional[bool] = Query(None),
     ):
         self.sort_by = sort_by
         self.nome = nome
         self.solo_entrata = solo_entrata
         self.solo_uscita = solo_uscita
-        self.solo_rimborso = solo_rimborso
 
     def model_dump(self):
         # Mantiene la compatibilità con la tua funzione di filtraggio

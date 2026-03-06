@@ -87,7 +87,6 @@ class Categoria(Base):
 
     solo_entrata = Column(Boolean, default=True)
     solo_uscita = Column(Boolean, default=True)
-    solo_rimborso = Column(Boolean, default=True)
 
     # Una categoria ha più sottocategorie
     sottocategorie = relationship(
@@ -117,7 +116,6 @@ class Sottocategoria(Base):
 
     solo_entrata = Column(Boolean, default=True)
     solo_uscita = Column(Boolean, default=True)
-    solo_rimborso = Column(Boolean, default=True)
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
