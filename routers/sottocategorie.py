@@ -4,6 +4,7 @@ from database import get_db
 import auth
 from models import Categoria, Sottocategoria
 from schemas import SottocategoriaCreate, SottocategoriaOut, SottocategoriaUpdate
+from sqlalchemy.orm import joinedload
 
 router = APIRouter(tags=["Sottocategorie"])
 
@@ -76,9 +77,10 @@ def update_sottocategoria(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    # Recuperiamo la sub con la categoria padre per i controlli di coerenza
+    # 1. Carichiamo esplicitamente la categoria padre con joinedload
     db_sub = (
         db.query(Sottocategoria)
+        .options(joinedload(Sottocategoria.categoria))  # <--- FONDAMENTALE
         .filter(
             Sottocategoria.id == sottocategoria_id,
             Sottocategoria.user_id == current_user_id,
@@ -93,34 +95,29 @@ def update_sottocategoria(
         )
 
     try:
-        # Trasformiamo il payload in dizionario escludendo i campi non inviati
         update_data = sub_data.model_dump(exclude_unset=True)
 
         for key, value in update_data.items():
-            # Check di coerenza con la categoria padre (opzionale ma consigliato)
-            if (
-                key == "solo_entrata"
-                and value is True
-                and not db_sub.categoria.solo_entrata
-            ):
-                continue
-            if (
-                key == "solo_uscita"
-                and value is True
-                and not db_sub.categoria.solo_uscita
-            ):
-                continue
+            # Il check ora funzionerà perché .categoria è già caricata
+            if key == "solo_entrata" and value is True:
+                if not db_sub.categoria.solo_entrata:
+                    continue
+
+            if key == "solo_uscita" and value is True:
+                if not db_sub.categoria.solo_uscita:
+                    continue
 
             setattr(db_sub, key, value)
 
         db.commit()
         db.refresh(db_sub)
         return db_sub
-    except Exception:
+    except Exception as e:
         db.rollback()
+        print(f"ERRORE REALE: {str(e)}")  # Controlla i log del terminale!
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to update the subcategory",
+            detail=f"Failed to update the subcategory: {str(e)}",
         )
 
 
