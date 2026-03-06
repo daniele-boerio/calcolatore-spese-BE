@@ -90,26 +90,28 @@ def create_transazione(
         # 3. Creazione record
         trans_data = transazione.model_dump()
 
-        # --- LOGICA RICHIESTA: Overwrite categoria e sottocategoria se è un rimborso ---
         if parent_trans:
             trans_data["categoria_id"] = parent_trans.categoria_id
             trans_data["sottocategoria_id"] = parent_trans.sottocategoria_id
             trans_data["tag_id"] = parent_trans.tag_id
 
-        # Inizializziamo importo_netto
+        # Inizializziamo importo_netto per la transazione corrente
         trans_data["importo_netto"] = transazione.importo
 
         new_trans = Transazione(**trans_data, user_id=current_user_id)
         db.add(new_trans)
 
-        # Se è un RIMBORSO, aggiorniamo l'importo_netto della transazione PADRE
+        # --- LOGICA CORRETTA PER AGGIORNARE IL PADRE ---
         if parent_trans:
+            # 1. Inizializza se null
             if parent_trans.importo_netto is None:
                 parent_trans.importo_netto = parent_trans.importo
 
-            parent_trans.importo_netto -= transazione.importo
-            # Non serve db.add(parent_trans) se l'oggetto arriva dalla query nella stessa sessione,
-            # ma male non fa.
+            # 2. Sottrai il Decimal
+            parent_trans.importo_netto -= Decimal(str(transazione.importo))
+
+            # 3. FONDAMENTALE: Forza SQLAlchemy a tracciare la modifica
+            db.add(parent_trans)
 
         # 4. Aggiornamento Saldo (Balance Update)
         # Il rimborso aumenta il saldo del conto (come un'entrata)
@@ -244,7 +246,15 @@ def update_transazione(
     # Salviamo i vecchi valori per il calcolo delle differenze
     old_importo = db_trans.importo
 
+    # (Codice iniziale invariato fino al blocco try)
     try:
+        # Salviamo importo netto vecchio (o importo se None)
+        old_importo_netto = (
+            db_trans.importo_netto
+            if db_trans.importo_netto is not None
+            else db_trans.importo
+        )
+
         # A. STORNO dal vecchio conto
         mod_vecchio = (
             Decimal("1") if db_trans.tipo == TipoTransazione.USCITA else Decimal("-1")
@@ -257,22 +267,17 @@ def update_transazione(
         for key, value in update_data.items():
             setattr(db_trans, key, value)
 
-        # Sincronizziamo i cambiamenti temporanei per assicurarci che db_trans.conto_id sia aggiornato
         db.flush()
 
-        # --- LOGICA AGGIORNAMENTO IMPORTO NETTO ---
-        new_importo = db_trans.importo  # Questo è già Decimal dallo schema
+        # --- LOGICA CORRETTA AGGIORNAMENTO IMPORTO NETTO ---
+        new_importo = Decimal(str(db_trans.importo))
         diff_importo = new_importo - old_importo
 
-        # Caso 1: Ho modificato l'importo della transazione stessa -> aggiorno il suo netto
-        # (se importo_netto è None, lo inizializzo)
-        if db_trans.importo_netto is None:
-            db_trans.importo_netto = new_importo
-        else:
-            # Se l'importo aumenta di 10, anche il netto aumenta di 10 (a parità di rimborsi)
-            db_trans.importo_netto += diff_importo
+        # Caso 1: Aggiorno il SUO importo_netto
+        # Il nuovo importo netto è il vecchio importo netto + la variazione dell'importo lordo
+        db_trans.importo_netto = old_importo_netto + diff_importo
 
-        # Caso 2: Se questa transazione è un RIMBORSO, devo aggiornare il netto del PADRE
+        # Caso 2: Se è un RIMBORSO, aggiorno il PADRE
         if db_trans.tipo == TipoTransazione.RIMBORSO and db_trans.parent_transaction_id:
             parent = (
                 db.query(Transazione)
@@ -282,9 +287,12 @@ def update_transazione(
             if parent:
                 if parent.importo_netto is None:
                     parent.importo_netto = parent.importo
-                # Se il rimborso aumenta (diff > 0), il netto del padre diminuisce
+
+                # Se l'importo del rimborso aumenta (diff > 0), il netto del padre DEVE DIMINUIRE
                 parent.importo_netto -= diff_importo
-        # ------------------------------------------
+
+                # Forza SQLAlchemy a tracciare la modifica
+                db.add(parent)
 
         # C. Recupero il CONTO DI DESTINAZIONE (potrebbe essere lo stesso o uno nuovo)
         conto_nuovo = (
