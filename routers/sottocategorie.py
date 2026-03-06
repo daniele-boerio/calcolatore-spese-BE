@@ -41,7 +41,7 @@ def add_sottocategorie(
             final_solo_uscita = sub_data.solo_uscita if db_cat.solo_uscita else False
 
             new_sub = Sottocategoria(
-                nome=sub_data.nome.trim(),  # Un piccolo trim non guasta mai
+                nome=sub_data.nome.strip(),
                 categoria_id=categoria_id,
                 user_id=current_user_id,
                 solo_entrata=final_solo_entrata,
