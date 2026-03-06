@@ -4,7 +4,6 @@ from database import get_db
 import auth
 from models import Categoria, Sottocategoria
 from schemas import SottocategoriaCreate, SottocategoriaOut, SottocategoriaUpdate
-from sqlalchemy.orm import joinedload
 
 router = APIRouter(tags=["Sottocategorie"])
 
@@ -77,10 +76,9 @@ def update_sottocategoria(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
-    # 1. Carichiamo esplicitamente la categoria padre con joinedload
+    # 1. Recupero semplice della sottocategoria
     db_sub = (
         db.query(Sottocategoria)
-        .options(joinedload(Sottocategoria.categoria))  # <--- FONDAMENTALE
         .filter(
             Sottocategoria.id == sottocategoria_id,
             Sottocategoria.user_id == current_user_id,
@@ -95,29 +93,24 @@ def update_sottocategoria(
         )
 
     try:
+        # 2. Trasformiamo l'input in dizionario (es. {"solo_entrata": False, ...})
         update_data = sub_data.model_dump(exclude_unset=True)
 
+        # 3. Applichiamo ogni valore ricevuto direttamente al database
         for key, value in update_data.items():
-            # Il check ora funzionerà perché .categoria è già caricata
-            if key == "solo_entrata" and value is True:
-                if not db_sub.categoria.solo_entrata:
-                    continue
-
-            if key == "solo_uscita" and value is True:
-                if not db_sub.categoria.solo_uscita:
-                    continue
-
             setattr(db_sub, key, value)
 
         db.commit()
         db.refresh(db_sub)
         return db_sub
+
     except Exception as e:
         db.rollback()
-        print(f"ERRORE REALE: {str(e)}")  # Controlla i log del terminale!
+        # Stampiamo l'errore nei log del server per sicurezza
+        print(f"Update error: {e}")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to update the subcategory: {str(e)}",
+            detail="Failed to update the subcategory",
         )
 
 
