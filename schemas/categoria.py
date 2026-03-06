@@ -1,6 +1,6 @@
 from datetime import datetime
 from fastapi import Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict  # Aggiornato a V2
 from typing import List, Optional
 from .sottocategoria import SottocategoriaCreate, SottocategoriaOut
 
@@ -16,8 +16,11 @@ class CategoriaCreate(CategoriaBase):
     sottocategorie: Optional[List[SottocategoriaCreate]] = None
 
 
-class CategoriaUpdate(CategoriaBase):
-    nome: str
+class CategoriaUpdate(BaseModel):  # Rendo i campi opzionali per la PATCH
+    nome: Optional[str] = None
+    solo_entrata: Optional[bool] = None
+    solo_uscita: Optional[bool] = None
+    solo_rimborso: Optional[bool] = None
 
 
 class CategoriaOut(CategoriaBase):
@@ -27,25 +30,26 @@ class CategoriaOut(CategoriaBase):
     lastImport: datetime
     sottocategorie: List[SottocategoriaOut] = []
 
-    class Config:
-        from_attributes = True
+    # Configurazione moderna Pydantic V2
+    model_config = ConfigDict(from_attributes=True)
 
 
 class CategoriaFilters:
     def __init__(
         self,
-        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
-        sort_by: Optional[list[str]] = Query(["nome:asc"]),
+        # Default ordinamento per nome
+        sort_by: Optional[List[str]] = Query(["nome:asc"]),
+        nome: Optional[str] = Query(None),
         solo_entrata: Optional[bool] = Query(None),
         solo_uscita: Optional[bool] = Query(None),
         solo_rimborso: Optional[bool] = Query(None),
     ):
         self.sort_by = sort_by
+        self.nome = nome
         self.solo_entrata = solo_entrata
         self.solo_uscita = solo_uscita
         self.solo_rimborso = solo_rimborso
 
-    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
     def model_dump(self):
-        # Restituisce un dizionario ignorando i valori None
+        # Mantiene la compatibilità con la tua funzione di filtraggio
         return {k: v for k, v in self.__dict__.items() if v is not None}

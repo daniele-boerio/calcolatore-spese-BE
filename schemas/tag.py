@@ -1,6 +1,6 @@
 from datetime import datetime
 from fastapi.params import Query
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict  # Usiamo ConfigDict
 from typing import Optional
 
 
@@ -21,19 +21,21 @@ class TagOut(TagBase):
     creationDate: datetime
     lastUpdate: datetime
 
-    class Config:
-        from_attributes = True
+    # Standard Pydantic V2
+    model_config = ConfigDict(from_attributes=True)
 
 
 class TagFilters:
     def __init__(
         self,
-        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
+        # Default ordinamento per nome ascendente
         sort_by: Optional[list[str]] = Query(["nome:asc"]),
+        nome: Optional[str] = Query(
+            None
+        ),  # Aggiunto filtro per nome se volessi cercarne uno specifico
     ):
         self.sort_by = sort_by
+        self.nome = nome
 
-    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
     def model_dump(self):
-        # Restituisce un dizionario ignorando i valori None
         return {k: v for k, v in self.__dict__.items() if v is not None}

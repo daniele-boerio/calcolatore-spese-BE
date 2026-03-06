@@ -1,6 +1,6 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, or_
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
@@ -9,6 +9,7 @@ from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
 from schemas.transazione import TipoTransazione
 from services import apply_filters_and_sort
 import calendar
+from decimal import Decimal
 
 router = APIRouter(prefix="/conti", tags=["Conti"])
 
@@ -151,42 +152,31 @@ def get_current_month_expenses(
     last_day = today.replace(day=last_day_num)
 
     # 1. Totale USCITE nel mese
-    total_out = (
-        db.query(func.sum(Transazione.importo_netto))
-        .join(Conto)
-        .filter(
-            Conto.user_id == current_user_id,
-            Transazione.tipo == TipoTransazione.USCITA,
-            Transazione.data >= first_day,
-            Transazione.data <= last_day,  # Filtro per evitare mesi futuri
-        )
-        .scalar()
-        or 0.0
-    )
+    total_out = db.query(func.sum(Transazione.importo_netto)).join(Conto).filter(
+        Conto.user_id == current_user_id,
+        Transazione.tipo == TipoTransazione.USCITA,
+        Transazione.data >= first_day,
+        Transazione.data <= last_day,
+    ).scalar() or Decimal("0")
 
-    total_in = (
-        db.query(func.sum(Transazione.importo_netto))
-        .join(Conto)
-        .filter(
-            Conto.user_id == current_user_id,
-            Transazione.tipo == TipoTransazione.ENTRATA,
-            Transazione.data >= first_day,
-            Transazione.data <= last_day,  # Filtro per evitare mesi futuri
-        )
-        .scalar()
-        or 0.0
-    )
+    total_in = db.query(func.sum(Transazione.importo_netto)).join(Conto).filter(
+        Conto.user_id == current_user_id,
+        Transazione.tipo == TipoTransazione.ENTRATA,
+        Transazione.data >= first_day,
+        Transazione.data <= last_day,
+    ).scalar() or Decimal("0")
 
     net_expenses = total_in - total_out
 
     percentage = None
-    if user.total_budget and user.total_budget > 0:
-        percentage = round((net_expenses / user.total_budget * 100), 1)
+    if user.total_budget and user.total_budget > Decimal("0"):
+        # Calcolo percentuale: trasformiamo in float solo alla fine per l'arrotondamento
+        percentage = round(float(net_expenses / user.total_budget * 100), 1)
 
     return {
         "monthly_budget": {
-            "totalBudget": user.total_budget,
-            "expenses": round(net_expenses, 2),
+            "total_budget": user.total_budget,
+            "expenses": net_expenses,  # Pydantic arrotonderà a 2 cifre
             "percentage": percentage,
             "period": {"start": first_day, "end": last_day},
         }
@@ -211,10 +201,7 @@ def get_expenses_by_category(
         .join(Conto)
         .filter(
             Conto.user_id == current_user_id,
-            or_(
-                Transazione.tipo == TipoTransazione.USCITA,
-                Transazione.tipo == TipoTransazione.RIMBORSO,
-            ),
+            Transazione.tipo == TipoTransazione.USCITA,
             Transazione.data >= first_day,
             Transazione.data <= last_day,  # Filtro per escludere transazioni future
         )
@@ -225,14 +212,14 @@ def get_expenses_by_category(
 
     for t in transazioni:
         cat_nome = t.categoria.nome if t.categoria else "Uncategorized"
+        # Inizializza con Decimal("0")
+        stats[cat_nome] = stats.get(cat_nome, Decimal("0")) + (
+            t.importo_netto or Decimal("0")
+        )
 
-        # Logica: USCITA somma al totale della categoria, RIMBORSO sottrae
-        if t.tipo == TipoTransazione.USCITA:
-            stats[cat_nome] = stats.get(cat_nome, 0.0) + t.importo
-        else:
-            stats[cat_nome] = stats.get(cat_nome, 0.0) - t.importo
-
-    # Restituiamo solo categorie con valore positivo (le rimborsate totalmente spariscono)
+    # Nella return, lasciamo che Pydantic o il casting gestiscano la pulizia
     return [
-        {"label": cat, "value": round(val, 2)} for cat, val in stats.items() if val > 0
+        {"label": cat, "value": val.quantize(Decimal("0.01"))}
+        for cat, val in stats.items()
+        if val > 0
     ]

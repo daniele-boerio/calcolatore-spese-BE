@@ -1,7 +1,7 @@
 from datetime import datetime
 from fastapi import Query
-from pydantic import BaseModel
-from typing import Optional
+from pydantic import BaseModel, ConfigDict  # Aggiornato a V2
+from typing import Optional, List
 
 
 class SottocategoriaBase(BaseModel):
@@ -12,11 +12,14 @@ class SottocategoriaBase(BaseModel):
 
 
 class SottocategoriaCreate(SottocategoriaBase):
-    pass
+    categoria_id: int  # Spesso serve passarlo esplicitamente in creazione
 
 
 class SottocategoriaUpdate(SottocategoriaBase):
-    pass
+    nome: Optional[str] = None
+    solo_entrata: Optional[bool] = None
+    solo_uscita: Optional[bool] = None
+    solo_rimborso: Optional[bool] = None
 
 
 class SottocategoriaOut(SottocategoriaBase):
@@ -26,19 +29,21 @@ class SottocategoriaOut(SottocategoriaBase):
     lastImport: datetime
     categoria_id: int
 
-    class Config:
-        from_attributes = True
+    # Configurazione moderna per Pydantic V2
+    model_config = ConfigDict(from_attributes=True)
 
 
 class SottocategoriaFilters:
     def __init__(
         self,
-        # Ora mettiamo Query() in TUTTI i campi per blindarli nella query string
-        sort_by: Optional[list[str]] = Query(["nome:asc"]),
+        sort_by: Optional[List[str]] = Query(["nome:asc"]),
+        # Aggiunto filtro utile: filtrare sottocategorie per categoria padre
+        categoria_id: Optional[int] = Query(None),
+        nome: Optional[str] = Query(None),
     ):
         self.sort_by = sort_by
+        self.categoria_id = categoria_id
+        self.nome = nome
 
-    # Creiamo questo metodo per non rompere la tua funzione apply_filters_and_sort
     def model_dump(self):
-        # Restituisce un dizionario ignorando i valori None
         return {k: v for k, v in self.__dict__.items() if v is not None}

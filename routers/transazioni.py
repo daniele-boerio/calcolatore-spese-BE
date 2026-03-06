@@ -11,11 +11,11 @@ from schemas import (
 )
 from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
-
 from services import apply_filters_and_sort
 from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
+from decimal import Decimal
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
@@ -113,7 +113,11 @@ def create_transazione(
 
         # 4. Aggiornamento Saldo (Balance Update)
         # Il rimborso aumenta il saldo del conto (come un'entrata)
-        modificatore = -1 if transazione.tipo == TipoTransazione.USCITA else 1
+        modificatore = (
+            Decimal("-1")
+            if transazione.tipo == TipoTransazione.USCITA
+            else Decimal("1")
+        )
         conto.saldo += transazione.importo * modificatore
 
         # AGGIORNAMENTO lastImport / Usage
@@ -157,22 +161,27 @@ def get_transazioni(
     # Rimuoviamo l'ordinamento con .order_by(None) per evitare il GroupingError
     total_entrata = (
         base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
-        .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
+        .order_by(None)
         .with_entities(func.sum(Transazione.importo))
         .scalar()
-        or 0.0
+        or Decimal("0.00")  # <--- Qui
     )
 
     # 4. Calcolo Totale Uscite
     total_uscita = (
-        base_query.filter(
-            (Transazione.tipo == TipoTransazione.USCITA)
-            | (Transazione.tipo == TipoTransazione.RIMBORSO)
-        )
-        .order_by(None)  # <--- FONDAMENTALE PER POSTGRES
+        base_query.filter((Transazione.tipo == TipoTransazione.USCITA))
+        .order_by(None)
         .with_entities(func.sum(Transazione.importo))
         .scalar()
-        or 0.0
+        or Decimal("0.00")  # <--- Qui
+    )
+
+    total_rimborsi = (
+        base_query.filter((Transazione.tipo == TipoTransazione.RIMBORSO))
+        .order_by(None)
+        .with_entities(func.sum(Transazione.importo))
+        .scalar()
+        or Decimal("0.00")  # <--- Qui
     )
 
     # 5. Recupero dati paginati (qui l'ordinamento serve e rimane quello di base_query)
@@ -182,8 +191,9 @@ def get_transazioni(
         "total": total,
         "page": page,
         "size": size,
-        "total_entrata": round(total_entrata, 2),
-        "total_uscita": round(total_uscita, 2),
+        "total_entrata": total_entrata,
+        "total_uscita": total_uscita,
+        "total_rimborsi": total_rimborsi,
         "data": data,
     }
 
@@ -236,7 +246,9 @@ def update_transazione(
 
     try:
         # A. STORNO dal vecchio conto
-        mod_vecchio = 1 if db_trans.tipo == TipoTransazione.USCITA else -1
+        mod_vecchio = (
+            Decimal("1") if db_trans.tipo == TipoTransazione.USCITA else Decimal("-1")
+        )
         if conto_vecchio:
             conto_vecchio.saldo += db_trans.importo * mod_vecchio
 
@@ -249,7 +261,7 @@ def update_transazione(
         db.flush()
 
         # --- LOGICA AGGIORNAMENTO IMPORTO NETTO ---
-        new_importo = db_trans.importo
+        new_importo = db_trans.importo  # Questo è già Decimal dallo schema
         diff_importo = new_importo - old_importo
 
         # Caso 1: Ho modificato l'importo della transazione stessa -> aggiorno il suo netto
@@ -287,7 +299,9 @@ def update_transazione(
             )
 
         # D. APPLICAZIONE al nuovo conto
-        mod_nuovo = -1 if db_trans.tipo == TipoTransazione.USCITA else 1
+        mod_nuovo = (
+            Decimal("-1") if db_trans.tipo == TipoTransazione.USCITA else Decimal("1")
+        )
         conto_nuovo.saldo += db_trans.importo * mod_nuovo
 
         # E. AGGIORNAMENTO lastImport (usiamo i nuovi ID se sono cambiati)

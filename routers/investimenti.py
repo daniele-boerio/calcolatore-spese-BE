@@ -13,6 +13,7 @@ from schemas.investimento import (
     InvestimentoFilters,
 )
 from services import apply_filters_and_sort
+from decimal import Decimal
 
 router = APIRouter(prefix="/investimenti", tags=["Investimenti"])
 
@@ -92,7 +93,10 @@ def create_investimento(
             data=payload.data_iniziale,
             quantita=payload.quantita_iniziale,
             prezzo_unitario=payload.prezzo_carico_iniziale,
-            valore_attuale=payload.quantita_iniziale * payload.prezzo_carico_iniziale,
+            # Arrotondiamo il controvalore monetario a 2 decimali
+            valore_attuale=(
+                payload.quantita_iniziale * payload.prezzo_carico_iniziale
+            ).quantize(Decimal("0.01")),
         )
         db.add(op_iniziale)
         db.commit()
@@ -196,7 +200,10 @@ def add_operazione(
         new_op = StoricoInvestimento(
             **payload.model_dump(),
             investimento_id=id,
-            valore_attuale=payload.quantita * payload.prezzo_unitario,
+            # Anche qui, precisione monetaria a 2 decimali
+            valore_attuale=(payload.quantita * payload.prezzo_unitario).quantize(
+                Decimal("0.01")
+            ),
         )
         db.add(new_op)
         db.commit()
@@ -241,7 +248,9 @@ def update_operazione(
         for key, value in update_data.items():
             setattr(db_op, key, value)
 
-        db_op.valore_attuale = db_op.quantita * db_op.prezzo_unitario
+        db_op.valore_attuale = (db_op.quantita * db_op.prezzo_unitario).quantize(
+            Decimal("0.01")
+        )
 
         db.commit()
         db.refresh(db_op)

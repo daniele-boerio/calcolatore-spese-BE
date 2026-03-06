@@ -1,7 +1,7 @@
 from sqlalchemy import (
     Column,
     Integer,
-    Float,
+    Numeric,
     String,
     DateTime,
     ForeignKey,
@@ -11,6 +11,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime, timezone
 from database import Base
+from decimal import Decimal
 
 
 class User(Base):
@@ -19,7 +20,7 @@ class User(Base):
     username = Column(String, unique=False, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
-    total_budget = Column(Float, nullable=True)  # Per la BudgetCard
+    total_budget = Column(Numeric(10, 2), nullable=True)
 
     conti = relationship(
         "Conto",
@@ -44,19 +45,13 @@ class Conto(Base):
     __tablename__ = "conti"
     id = Column(Integer, primary_key=True, index=True)
     nome = Column(String, nullable=False)
-    saldo = Column(Float, nullable=False, default=0.0)  # Saldo dinamico
+    saldo = Column(Numeric(10, 2), nullable=False, default=0.0)
 
     # --- Nuovi campi per Satispay-style ---
     ricarica_automatica = Column(Boolean, default=False)
-    budget_obiettivo = Column(
-        Float, nullable=True
-    )  # Il valore a cui deve tornare il saldo
-    soglia_minima = Column(
-        Float, nullable=True
-    )  # Il valore sotto il quale scatta la ricarica
-    conto_sorgente_id = Column(
-        Integer, ForeignKey("conti.id"), nullable=True
-    )  # Da dove prendiamo i soldi
+    budget_obiettivo = Column(Numeric(10, 2), nullable=True)
+    soglia_minima = Column(Numeric(10, 2), nullable=True)
+    conto_sorgente_id = Column(Integer, ForeignKey("conti.id"), nullable=True)
     frequenza_controllo = Column(String, nullable=True)  # "SETTIMANALE" o "MENSILE"
     prossimo_controllo = Column(
         Date, nullable=True
@@ -156,7 +151,7 @@ class Tag(Base):
 class Transazione(Base):
     __tablename__ = "transazioni"
     id = Column(Integer, primary_key=True, index=True)
-    importo = Column(Float, nullable=False)
+    importo = Column(Numeric(10, 2), nullable=False)
     tipo = Column(String, nullable=False)  # "ENTRATA", "USCITA" o "RIMBORSO"
     data = Column(Date)
     descrizione = Column(String)
@@ -182,7 +177,7 @@ class Transazione(Base):
         cascade="all, delete-orphan",
     )
 
-    importo_netto = Column(Float, nullable=True)  # Denormalizzato: importo - rimborsi
+    importo_netto = Column(Numeric(10, 2), nullable=True)
 
     # Relazioni
     categoria = relationship(
@@ -210,7 +205,7 @@ class Investimento(Base):
     nome_titolo = Column(String)
     user_id = Column(Integer, ForeignKey("users.id"))
 
-    prezzo_attuale = Column(Float, nullable=True)
+    prezzo_attuale = Column(Numeric(18, 6), nullable=True)
     data_ultimo_aggiornamento = Column(Date, nullable=True)
 
     # Ordinamento cronologico per calcoli, ma visualizzazione desc per la lista
@@ -230,23 +225,28 @@ class Investimento(Base):
     # --- PROPRIETÀ CALCOLATE ---
     @property
     def quantita_totale(self):
-        return sum(s.quantita for s in self.storico)
+        return sum((s.quantita for s in self.storico), Decimal("0"))
 
     @property
     def prezzo_medio_carico(self):
-        # Il PMC si calcola solo sugli acquisti (quantità > 0)
         acquisti = [s for s in self.storico if s.quantita > 0]
         if not acquisti:
-            return 0
-        totale_speso = sum(s.quantita * s.prezzo_unitario for s in acquisti)
-        totale_quantita = sum(s.quantita for s in acquisti)
-        return totale_speso / totale_quantita if totale_quantita > 0 else 0
+            return Decimal("0")
+        totale_speso = sum(
+            (s.quantita * s.prezzo_unitario for s in acquisti), Decimal("0")
+        )
+        totale_quantita = sum((s.quantita for s in acquisti), Decimal("0"))
+        return (
+            (totale_speso / totale_quantita).quantize(Decimal("0.000001"))
+            if totale_quantita > 0
+            else Decimal("0")
+        )
 
     @property
     def valore_posizione(self):
         if not self.prezzo_attuale:
-            return 0
-        return self.quantita_totale * self.prezzo_attuale
+            return Decimal("0")
+        return (self.quantita_totale * self.prezzo_attuale).quantize(Decimal("0.01"))
 
 
 class StoricoInvestimento(Base):
@@ -254,9 +254,9 @@ class StoricoInvestimento(Base):
     id = Column(Integer, primary_key=True, index=True)
     investimento_id = Column(Integer, ForeignKey("investimenti.id", ondelete="CASCADE"))
     data = Column(Date, nullable=False)
-    quantita = Column(Float)
-    prezzo_unitario = Column(Float)
-    valore_attuale = Column(Float)  # Controvalore al momento dell'operazione
+    quantita = Column(Numeric(18, 6))
+    prezzo_unitario = Column(Numeric(18, 6))
+    valore_attuale = Column(Numeric(18, 2))
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
@@ -269,7 +269,7 @@ class StoricoInvestimento(Base):
 class Ricorrenza(Base):
     __tablename__ = "ricorrenze"
     id = Column(Integer, primary_key=True, index=True)
-    importo = Column(Float, nullable=False)
+    importo = Column(Numeric(10, 2), nullable=False)
     nome = Column(String, nullable=False)
     tipo = Column(String, nullable=False)  # "ENTRATA", "USCITA" o "RIMBORSO"
     frequenza = Column(

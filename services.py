@@ -7,6 +7,7 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Query
 from sqlalchemy import asc, desc
 from pydantic import BaseModel
+from decimal import Decimal
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -24,7 +25,7 @@ def get_live_price(ticker_symbol: str, isin_code: str):
         data = ticker.history(period="1d")
 
         if not data.empty:
-            return float(data["Close"].iloc[-1])
+            return Decimal(str(data["Close"].iloc[-1]))
 
         # Secondo tentativo se il primo fallisce
         if ticker_symbol and isin_code and search_term != isin_code:
@@ -32,7 +33,7 @@ def get_live_price(ticker_symbol: str, isin_code: str):
             ticker = yf.Ticker(isin_code)
             data = ticker.history(period="1d")
             if not data.empty:
-                return float(data["Close"].iloc[-1])
+                return Decimal(str(data["Close"].iloc[-1]))
 
         logger.warning(f"Nessun dato trovato per {search_term}")
         return None
@@ -155,7 +156,9 @@ def task_ricarica_automatica_conti():
     for conto in conti_da_controllare:
         # Se il saldo è sceso sotto la soglia minima
         if conto.saldo < conto.soglia_minima:
-            importo_ricarica = conto.budget_obiettivo - conto.saldo
+            importo_ricarica = (conto.budget_obiettivo - conto.saldo).quantize(
+                Decimal("0.01")
+            )
             conto_sorgente = db.query(models.Conto).get(conto.conto_sorgente_id)
 
             if conto_sorgente and conto_sorgente.saldo >= importo_ricarica:

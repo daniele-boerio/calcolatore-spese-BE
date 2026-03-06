@@ -123,7 +123,7 @@ def update_monthly_budget(
 
     try:
         # Aggiornamento budget
-        user.total_budget = budget_data.totalBudget
+        user.total_budget = budget_data.total_budget
         db.commit()
 
         # Restituiamo i dati aggiornati
