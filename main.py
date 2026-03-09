@@ -15,6 +15,7 @@ from routers import (
     sottocategorie,
     tag,
     ricorrenze,
+    statistics,
 )
 
 app = FastAPI(
@@ -39,6 +40,7 @@ app.include_router(transazioni.router)  # Transazioni
 app.include_router(investimenti.router)  # Investimenti
 app.include_router(tag.router)  # Tag
 app.include_router(ricorrenze.router)  # Ricorrenze
+app.include_router(statistics.router)  # Statistiche
 
 # Scheduler (rimane qui)
 scheduler = BackgroundScheduler()
