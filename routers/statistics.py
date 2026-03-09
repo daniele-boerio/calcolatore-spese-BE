@@ -6,7 +6,7 @@ from database import get_db
 from auth import get_current_user_id
 from models import Transazione, Categoria, Sottocategoria
 
-router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
+router = APIRouter(prefix="/statistics", tags=["Statistics"])
 
 
 @router.get("/monthly")
