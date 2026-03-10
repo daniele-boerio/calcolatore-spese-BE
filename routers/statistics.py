@@ -84,10 +84,13 @@ def get_year_details_statistics(
 def get_month_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     month: int = Query(..., description="Il mese di riferimento (1-12)"),
+    categoria_id: Optional[int] = Query(
+        None, description="Filtra per categoria padre"
+    ),  # <-- AGGIUNTO
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # 1. Definiamo la logica di calcolo dell'importo (identica a yearTable)
+    # 1. Definiamo la logica di calcolo dell'importo
     amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
 
     calculated_amount = case(
@@ -96,7 +99,7 @@ def get_month_details_statistics(
         else_=0,  # Escludiamo i RIMBORSI dal calcolo diretto
     )
 
-    # 2. Costruiamo la query principale aggregando per Categoria E Sottocategoria
+    # 2. Costruiamo la query base senza il group_by (che aggiungiamo dopo)
     query = (
         db.query(
             Categoria.nome.label("categoria_nome"),
@@ -111,8 +114,14 @@ def get_month_details_statistics(
             extract("month", Transazione.data) == month,
             Transazione.tipo != "RIMBORSO",
         )
-        .group_by(Categoria.nome, Sottocategoria.nome)
     )
+
+    # 3. Se passiamo un categoria_id, filtriamo solo le transazioni di quella categoria
+    if categoria_id:
+        query = query.filter(Transazione.categoria_id == categoria_id)
+
+    # 4. Applichiamo il raggruppamento e recuperiamo i dati
+    query = query.group_by(Categoria.nome, Sottocategoria.nome)
 
     results = query.all()
 
