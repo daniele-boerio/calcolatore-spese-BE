@@ -115,12 +115,12 @@ def get_month_details_statistics(
         total_sub = float(row.total or 0)
 
         # Determina il tipo di categoria in modo più snello
-        tipo_cat = "other"
+        tipo_cat = "OTHER"
         if cat_name != "Uncategorized":
             if row.solo_entrata and not row.solo_uscita:
-                tipo_cat = "entrata"
+                tipo_cat = "ENTRATA"
             elif row.solo_uscita and not row.solo_entrata:
-                tipo_cat = "uscita"
+                tipo_cat = "USCITA"
 
         # Usa setdefault per inizializzare il dizionario se non esiste
         cat_data = categorie_dict.setdefault(
