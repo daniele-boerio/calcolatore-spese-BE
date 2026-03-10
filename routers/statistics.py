@@ -9,7 +9,7 @@ from models import Transazione, Categoria, Sottocategoria
 router = APIRouter(prefix="/statistics", tags=["Statistics"])
 
 
-@router.get("/monthDetails")
+@router.get("/yearDetails")
 def get_year_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
