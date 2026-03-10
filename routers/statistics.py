@@ -132,9 +132,7 @@ def get_month_details_statistics(
         # Gestiamo i casi in cui la transazione non ha categoria o sottocategoria
         cat_name = row.categoria_nome if row.categoria_nome else "Uncategorized"
         sub_name = (
-            row.sottocategoria_nome
-            if row.sottocategoria_nome
-            else "Nessuna sottocategoria"
+            row.sottocategoria_nome if row.sottocategoria_nome else "Uncategorized"
         )
         total = float(row.total or 0)
 
