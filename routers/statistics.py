@@ -9,6 +9,16 @@ from models import Transazione, Categoria, Sottocategoria
 router = APIRouter(prefix="/statistics", tags=["Statistics"])
 
 
+# Helper per calcolare l'importo standard per le statistiche
+def get_calculated_amount():
+    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
+    return case(
+        (Transazione.tipo == "USCITA", -amount_expr),
+        (Transazione.tipo == "ENTRATA", amount_expr),
+        else_=0,  # I RIMBORSI vengono scartati
+    )
+
+
 @router.get("/yearDetails")
 def get_year_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
@@ -16,67 +26,44 @@ def get_year_details_statistics(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # 1. Definiamo quale colonna usare come "Etichetta" (Categoria o Sottocategoria)
-    if categoria_id:
-        label_col = Sottocategoria.nome
-        join_model = Sottocategoria
-        join_condition = Transazione.sottocategoria_id == Sottocategoria.id
-    else:
-        label_col = Categoria.nome
-        join_model = Categoria
-        join_condition = Transazione.categoria_id == Categoria.id
-
-    # 2. Definiamo la logica di calcolo dell'importo
-    # Usiamo importo_netto (con fallback su importo se per caso è NULL)
-    # Le uscite diventano negative, le entrate positive.
-    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
-
-    calculated_amount = case(
-        (Transazione.tipo == "USCITA", -amount_expr),
-        (Transazione.tipo == "ENTRATA", amount_expr),
-        else_=0,  # I RIMBORSI vengono scartati perché il loro valore è già sottratto dal padre
+    # 1. Configurazione dinamica per Categoria vs Sottocategoria
+    join_model = Sottocategoria if categoria_id else Categoria
+    label_col = Sottocategoria.nome if categoria_id else Categoria.nome
+    join_condition = (
+        Transazione.sottocategoria_id == Sottocategoria.id
+        if categoria_id
+        else Transazione.categoria_id == Categoria.id
     )
 
-    # 3. Costruiamo la query principale
+    # 2. Query ottimizzata
     query = (
         db.query(
             extract("month", Transazione.data).label("month"),
             label_col.label("label"),
-            func.sum(calculated_amount).label("total"),
+            func.sum(get_calculated_amount()).label("total"),
         )
-        # Usiamo outerjoin così se una transazione non ha categoria non scompare dai conti
         .outerjoin(join_model, join_condition)
         .filter(
             Transazione.user_id == current_user_id,
             extract("year", Transazione.data) == year,
-            Transazione.tipo
-            != "RIMBORSO",  # Escludiamo i figli per non sdoppiare il calcolo
+            Transazione.tipo != "RIMBORSO",
         )
     )
 
-    # 4. Applichiamo il filtro della categoria se l'utente l'ha selezionata
     if categoria_id:
         query = query.filter(Transazione.categoria_id == categoria_id)
 
-    # 5. Raggruppiamo per mese ed etichetta
     results = query.group_by("month", "label").all()
 
-    # --- POST-ELABORAZIONE IN PYTHON ---
-    # Creiamo un dizionario di base con tutti i 12 mesi a zero
-    # Questo garantisce che il frontend riceva sempre la struttura completa
+    # 3. Costruzione dizionario mensile pre-riempito (comprensione del dizionario)
     monthly_data = {m: {"month": m} for m in range(1, 13)}
 
+    # 4. Popolamento efficiente
     for row in results:
-        # Se il database restituisce float o Decimal, lo convertiamo in modo sicuro
-        month_int = int(row.month)
-        # Se l'etichetta è NULL (es. transazione senza categoria), le diamo un nome generico
-        label = row.label if row.label else "Uncategorized"
-        total = float(row.total or 0)
+        month_idx = int(row.month)
+        label = row.label or "Uncategorized"
+        monthly_data[month_idx][label] = float(row.total or 0)
 
-        # Popoliamo il dizionario dinamico
-        monthly_data[month_int][label] = total
-
-    # Restituiamo solo i valori (una lista di dizionari)
     return list(monthly_data.values())
 
 
@@ -84,27 +71,18 @@ def get_year_details_statistics(
 def get_month_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     month: int = Query(..., description="Il mese di riferimento (1-12)"),
-    categoria_id: Optional[int] = Query(
-        None, description="Filtra per categoria padre"
-    ),  # <-- AGGIUNTO
+    categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # 1. Definiamo la logica di calcolo dell'importo
-    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
-
-    calculated_amount = case(
-        (Transazione.tipo == "USCITA", -amount_expr),
-        (Transazione.tipo == "ENTRATA", amount_expr),
-        else_=0,  # Escludiamo i RIMBORSI dal calcolo diretto
-    )
-
-    # 2. Costruiamo la query base senza il group_by (che aggiungiamo dopo)
+    # 1. Costruzione query
     query = (
         db.query(
             Categoria.nome.label("categoria_nome"),
+            Categoria.solo_entrata,
+            Categoria.solo_uscita,
             Sottocategoria.nome.label("sottocategoria_nome"),
-            func.sum(calculated_amount).label("total"),
+            func.sum(get_calculated_amount()).label("total"),
         )
         .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
         .outerjoin(Sottocategoria, Transazione.sottocategoria_id == Sottocategoria.id)
@@ -116,33 +94,58 @@ def get_month_details_statistics(
         )
     )
 
-    # 3. Se passiamo un categoria_id, filtriamo solo le transazioni di quella categoria
     if categoria_id:
         query = query.filter(Transazione.categoria_id == categoria_id)
 
-    # 4. Applichiamo il raggruppamento e recuperiamo i dati
-    query = query.group_by(Categoria.nome, Sottocategoria.nome)
+    query = query.group_by(
+        Categoria.nome,
+        Categoria.solo_entrata,
+        Categoria.solo_uscita,
+        Sottocategoria.nome,
+    )
 
     results = query.all()
 
-    # --- POST-ELABORAZIONE IN PYTHON ---
-    details = []
+    # 2. Raggruppamento dati con dict.setdefault()
+    categorie_dict = {}
 
     for row in results:
-        # Gestiamo i casi in cui la transazione non ha categoria o sottocategoria
-        cat_name = row.categoria_nome if row.categoria_nome else "Uncategorized"
-        sub_name = (
-            row.sottocategoria_nome if row.sottocategoria_nome else "Uncategorized"
+        cat_name = row.categoria_nome or "Uncategorized"
+        sub_name = row.sottocategoria_nome or "Nessuna sottocategoria"
+        total_sub = float(row.total or 0)
+
+        # Determina il tipo di categoria in modo più snello
+        tipo_cat = "other"
+        if cat_name != "Uncategorized":
+            if row.solo_entrata and not row.solo_uscita:
+                tipo_cat = "entrata"
+            elif row.solo_uscita and not row.solo_entrata:
+                tipo_cat = "uscita"
+
+        # Usa setdefault per inizializzare il dizionario se non esiste
+        cat_data = categorie_dict.setdefault(
+            cat_name,
+            {
+                "categoria": cat_name,
+                "totale": 0.0,
+                "tipo": tipo_cat,
+                "sottocategorie": [],
+            },
         )
-        total = float(row.total or 0)
 
-        details.append(
-            {"categoria": cat_name, "sottocategoria": sub_name, "totale": total}
+        cat_data["totale"] += total_sub
+        cat_data["sottocategorie"].append(
+            {"sottocategoria": sub_name, "totale": total_sub}
         )
 
-    # Ordiniamo i risultati prima per Categoria e poi per Sottocategoria alfabeticamente
-    details_sorted = sorted(
-        details, key=lambda x: (x["categoria"], x["sottocategoria"])
-    )
+    # 3. Formattazione finale: ordinamento e arrotondamento
+    details_list = []
+    # Ordiniamo prima le chiavi del dizionario
+    for cat_name in sorted(categorie_dict.keys()):
+        cat = categorie_dict[cat_name]
+        cat["totale"] = round(cat["totale"], 2)
+        # Ordina le sottocategorie
+        cat["sottocategorie"].sort(key=lambda x: x["sottocategoria"])
+        details_list.append(cat)
 
-    return details_sorted
+    return details_list
