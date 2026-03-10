@@ -111,7 +111,7 @@ def get_month_details_statistics(
 
     for row in results:
         cat_name = row.categoria_nome or "Uncategorized"
-        sub_name = row.sottocategoria_nome or "Nessuna sottocategoria"
+        sub_name = row.sottocategoria_nome or "Uncategorized"
         total_sub = float(row.total or 0)
 
         # Determina il tipo di categoria in modo più snello
