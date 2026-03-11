@@ -106,6 +106,7 @@ def task_transazioni_ricorrenti():
         # 2. Crea la transazione reale
         nuova_trans = models.Transazione(
             importo=ric.importo,
+            importo_netto=ric.importo,
             tipo=ric.tipo,
             descrizione=f"Ricorrente: {ric.nome}",
             data=datetime.now(),
