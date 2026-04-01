@@ -6,6 +6,8 @@ from .user import (
     LoginRequest,
     UserBudgetUpdate,
     UserResponse,
+    ForgotPasswordRequest,
+    ResetPasswordRequest,
 )
 from .conto import (
     ContoBase,

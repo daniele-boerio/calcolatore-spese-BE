@@ -33,6 +33,9 @@ class User(Base):
         order_by="desc(Investimento.creationDate), desc(Investimento.lastUpdate), Investimento.id",
     )
 
+    reset_token = Column(String, nullable=True, index=True)
+    reset_token_expiration = Column(DateTime, nullable=True)
+
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
         DateTime,

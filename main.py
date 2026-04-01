@@ -7,6 +7,7 @@ from services import (
     task_ricarica_automatica_conti,
 )
 from routers import (
+    auth,
     conti,
     categorie,
     transazioni,
@@ -41,6 +42,7 @@ app.include_router(investimenti.router)  # Investimenti
 app.include_router(tag.router)  # Tag
 app.include_router(ricorrenze.router)  # Ricorrenze
 app.include_router(statistics.router)  # Statistiche
+app.include_router(auth.router)  # Endpoint per forgot-password e reset-password
 
 # Scheduler (rimane qui)
 scheduler = BackgroundScheduler()
