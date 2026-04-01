@@ -51,7 +51,12 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
 
-        access_token = auth.create_access_token(data={"user_id": new_user.id})
+        access_token = auth.create_access_token(
+            data={
+                "user_id": new_user.id,
+                "token_version": getattr(new_user, "token_version", 1),
+            }
+        )
 
         return {"access_token": access_token, "username": new_user.username}
     except Exception:
@@ -72,13 +77,22 @@ def login(
             detail="Username and password are required",
         )
 
-    username_lower = form_data.username.lower()
-    user = db.query(User).filter(User.username == username_lower).first()
+    # Il campo si chiama "username" in OAuth2PasswordRequestForm, ma può contenere sia username che email
+    login_identifier = form_data.username.lower()
+
+    # Cerchiamo l'utente sia per username che per email usando or_
+    from sqlalchemy import or_
+
+    user = (
+        db.query(User)
+        .filter(or_(User.username == login_identifier, User.email == login_identifier))
+        .first()
+    )
 
     if not user:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account not found. Please verify your username",
+            detail="Account not found. Please verify your credentials",
         )
 
     if not auth.verify_password(form_data.password, user.hashed_password):
@@ -87,7 +101,10 @@ def login(
             detail="Incorrect password. Try again",
         )
 
-    access_token = auth.create_access_token(data={"user_id": user.id})
+    # Inseriamo la token_version nel JWT per validarla successivamente
+    access_token = auth.create_access_token(
+        data={"user_id": user.id, "token_version": user.token_version}
+    )
 
     return {"access_token": access_token, "username": user.username}
 

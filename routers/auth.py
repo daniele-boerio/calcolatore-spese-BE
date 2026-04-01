@@ -103,6 +103,9 @@ def reset_password(request: ResetPasswordRequest, db: Session = Depends(get_db))
     # 3. Aggiorna la password (ricordati di farne l'hashing!)
     user.hashed_password = get_password_hash(request.new_password)
 
+    # Invalida i token di accesso esistenti incrementando la versione del token
+    user.token_version = getattr(user, "token_version", 1) + 1
+
     # 4. Invalida il token per evitare che venga riutilizzato
     user.reset_token = None
     user.reset_token_expiration = None

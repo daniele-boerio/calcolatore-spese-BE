@@ -5,6 +5,8 @@ from datetime import datetime, timedelta
 from jose import jwt, JWTError
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from database import SessionLocal
+from models import User
 
 load_dotenv()
 
@@ -39,6 +41,7 @@ def create_access_token(data: dict):
 security = HTTPBearer()
 
 
+# Per evitare un'importazione circolare in auth.py, passiamo una dipendenza lazy o creiamo get_current_user_id nel router
 def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(security)):
     token = credentials.credentials  # Estrae automaticamente la stringa dopo 'Bearer '
 
@@ -56,9 +59,21 @@ def get_current_user_id(credentials: HTTPAuthorizationCredentials = Depends(secu
         payload = jwt.decode(token, secret, algorithms=[algo])
 
         user_id: int = payload.get("user_id")
+        token_version: int = payload.get("token_version", 1)
+
         if user_id is None:
             print("DEBUG - user_id non trovato nel payload")
             raise credentials_exception
+
+        # Creiamo una sessione DB al volo per verificare la validità del token rispetto alla password cambiata
+        db = SessionLocal()
+        try:
+            user = db.query(User).filter(User.id == user_id).first()
+            if not user or user.token_version != token_version:
+                print("DEBUG - token obsoleto o utente non trovato")
+                raise credentials_exception
+        finally:
+            db.close()
 
         return user_id
 

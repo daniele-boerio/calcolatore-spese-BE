@@ -35,6 +35,7 @@ class User(Base):
 
     reset_token = Column(String, nullable=True, index=True)
     reset_token_expiration = Column(DateTime, nullable=True)
+    token_version = Column(Integer, default=1, nullable=False)
 
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
