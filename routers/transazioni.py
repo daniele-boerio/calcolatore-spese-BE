@@ -95,6 +95,32 @@ def create_transazione(
             trans_data["sottocategoria_id"] = parent_trans.sottocategoria_id
             trans_data["tag_id"] = parent_trans.tag_id
 
+        # --- NUOVA LOGICA: AUTOCOMPILAZIONE DESCRIZIONE ---
+        desc_text = trans_data.get("descrizione")
+        # Se non c'è descrizione o è solo composta da spazi vuoti
+        if not desc_text or not str(desc_text).strip():
+            # Primo tentativo: Recupera il nome della Sottocategoria
+            if trans_data.get("sottocategoria_id"):
+                sotto = (
+                    db.query(Sottocategoria)
+                    .filter(Sottocategoria.id == trans_data["sottocategoria_id"])
+                    .first()
+                )
+                if sotto:
+                    trans_data["descrizione"] = sotto.nome
+
+            # Secondo tentativo (se ancora vuoto): Recupera il nome della Categoria
+            if not trans_data.get("descrizione"):
+                if trans_data.get("categoria_id"):
+                    cat = (
+                        db.query(Categoria)
+                        .filter(Categoria.id == trans_data["categoria_id"])
+                        .first()
+                    )
+                    if cat:
+                        trans_data["descrizione"] = cat.nome
+        # ----------------------------------------------------
+
         # Inizializziamo importo_netto per la transazione corrente
         trans_data["importo_netto"] = transazione.importo
 
@@ -123,9 +149,7 @@ def create_transazione(
         conto.saldo += transazione.importo * modificatore
 
         # AGGIORNAMENTO lastImport / Usage
-        # Usiamo i valori finali (quelli del padre se rimborso, o quelli inviati se normale)
         update_category_usage(db, new_trans.categoria_id, new_trans.sottocategoria_id)
-
         update_conto_usage(db, transazione.conto_id)
 
         db.commit()
@@ -246,7 +270,6 @@ def update_transazione(
     # Salviamo i vecchi valori per il calcolo delle differenze
     old_importo = db_trans.importo
 
-    # (Codice iniziale invariato fino al blocco try)
     try:
         # Salviamo importo netto vecchio (o importo se None)
         old_importo_netto = (
@@ -267,7 +290,44 @@ def update_transazione(
         for key, value in update_data.items():
             setattr(db_trans, key, value)
 
+        # --- AUTOCOMPILAZIONE DESCRIZIONE ANCHE IN MODIFICA ---
+        if not db_trans.descrizione or not str(db_trans.descrizione).strip():
+            if db_trans.sottocategoria_id:
+                sotto = (
+                    db.query(Sottocategoria)
+                    .filter(Sottocategoria.id == db_trans.sottocategoria_id)
+                    .first()
+                )
+                if sotto:
+                    db_trans.descrizione = sotto.nome
+
+            if not db_trans.descrizione and db_trans.categoria_id:
+                cat = (
+                    db.query(Categoria)
+                    .filter(Categoria.id == db_trans.categoria_id)
+                    .first()
+                )
+                if cat:
+                    db_trans.descrizione = cat.nome
+        # ------------------------------------------------------
+
         db.flush()
+
+        # --- PROPAGAZIONE CATEGORIA/SOTTOCATEGORIA AI RIMBORSI ---
+        # Cerchiamo tutti i rimborsi che hanno questa transazione come "padre"
+        rimborsi_figli = (
+            db.query(Transazione)
+            .filter(Transazione.parent_transaction_id == db_trans.id)
+            .all()
+        )
+
+        # Allineiamo categoria, sottocategoria e tag ai figli
+        for rimborso in rimborsi_figli:
+            rimborso.categoria_id = db_trans.categoria_id
+            rimborso.sottocategoria_id = db_trans.sottocategoria_id
+            rimborso.tag_id = db_trans.tag_id
+            db.add(rimborso)
+        # ---------------------------------------------------------
 
         # --- LOGICA CORRETTA AGGIORNAMENTO IMPORTO NETTO ---
         new_importo = Decimal(str(db_trans.importo))
