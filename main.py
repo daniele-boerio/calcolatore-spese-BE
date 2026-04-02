@@ -17,6 +17,7 @@ from routers import (
     tag,
     ricorrenze,
     statistics,
+    charts,  # Aggiunto nuovo router
 )
 
 app = FastAPI(
@@ -42,6 +43,7 @@ app.include_router(investimenti.router)  # Investimenti
 app.include_router(tag.router)  # Tag
 app.include_router(ricorrenze.router)  # Ricorrenze
 app.include_router(statistics.router)  # Statistiche
+app.include_router(charts.router)  # API Grafici
 app.include_router(auth.router)  # Endpoint per forgot-password e reset-password
 
 # Scheduler (rimane qui)
