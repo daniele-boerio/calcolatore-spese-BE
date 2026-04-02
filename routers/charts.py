@@ -229,6 +229,7 @@ def get_chart_category_trend(
         db.query(
             extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
+            Transazione.tipo,
             func.sum(Transazione.importo_netto).label("total"),
         )
         .filter(
@@ -236,9 +237,9 @@ def get_chart_category_trend(
             Transazione.categoria_id == categoria_id,
             Transazione.data >= inizio,
             Transazione.data <= fine,
-            Transazione.tipo == "USCITA",
+            Transazione.tipo != "RIMBORSO",
         )
-        .group_by("year", "month")
+        .group_by("year", "month", Transazione.tipo)
         .all()
     )
 
@@ -251,6 +252,11 @@ def get_chart_category_trend(
         label_key = f"{y}-{m:02d}" if multi_year else f"{m}"
 
         if label_key in monthly_data:
-            monthly_data[label_key]["spesa"] = round(float(row.total or 0), 2)
+            importo = float(row.total or 0)
+            if row.tipo == "USCITA":
+                monthly_data[label_key]["spesa"] += round(importo, 2)
+            elif row.tipo == "ENTRATA":
+                # Le entrate aumentano il trend positivo (o compensano le uscite nel caso misto)
+                monthly_data[label_key]["spesa"] -= round(importo, 2)
 
     return list(monthly_data.values())
