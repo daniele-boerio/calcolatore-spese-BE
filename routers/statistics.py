@@ -55,6 +55,30 @@ def get_year_details_statistics(
 
     results = query.group_by("month", "label").all()
 
+    # Calcolo totali annuali per tipo
+    totals_query = db.query(
+        Transazione.tipo, func.sum(Transazione.importo).label("total")
+    ).filter(
+        Transazione.user_id == current_user_id,
+        extract("year", Transazione.data) == year,
+    )
+    if categoria_id:
+        totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
+
+    totals_results = totals_query.group_by(Transazione.tipo).all()
+
+    totale_entrata = 0.0
+    totale_uscita = 0.0
+    totale_rimborsi = 0.0
+
+    for row in totals_results:
+        if row.tipo == "ENTRATA":
+            totale_entrata = float(row.total or 0)
+        elif row.tipo == "USCITA":
+            totale_uscita = float(row.total or 0)
+        elif row.tipo == "RIMBORSO":
+            totale_rimborsi = float(row.total or 0)
+
     # 3. Costruzione dizionario mensile pre-riempito (comprensione del dizionario)
     monthly_data = {m: {"month": m} for m in range(1, 13)}
 
@@ -64,7 +88,12 @@ def get_year_details_statistics(
         label = row.label or "Uncategorized"
         monthly_data[month_idx][label] = float(row.total or 0)
 
-    return list(monthly_data.values())
+    return {
+        "data": list(monthly_data.values()),
+        "totale_entrata": round(totale_entrata, 2),
+        "totale_uscita": round(totale_uscita, 2),
+        "totale_rimborsi": round(totale_rimborsi, 2),
+    }
 
 
 @router.get("/monthDetails")
@@ -148,4 +177,34 @@ def get_month_details_statistics(
         cat["sottocategorie"].sort(key=lambda x: x["sottocategoria"])
         details_list.append(cat)
 
-    return details_list
+    # Calcolo totali mensili per tipo
+    totals_query = db.query(
+        Transazione.tipo, func.sum(Transazione.importo).label("total")
+    ).filter(
+        Transazione.user_id == current_user_id,
+        extract("year", Transazione.data) == year,
+        extract("month", Transazione.data) == month,
+    )
+    if categoria_id:
+        totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
+
+    totals_results = totals_query.group_by(Transazione.tipo).all()
+
+    totale_entrata = 0.0
+    totale_uscita = 0.0
+    totale_rimborsi = 0.0
+
+    for row in totals_results:
+        if row.tipo == "ENTRATA":
+            totale_entrata = float(row.total or 0)
+        elif row.tipo == "USCITA":
+            totale_uscita = float(row.total or 0)
+        elif row.tipo == "RIMBORSO":
+            totale_rimborsi = float(row.total or 0)
+
+    return {
+        "data": details_list,
+        "totale_entrata": round(totale_entrata, 2),
+        "totale_uscita": round(totale_uscita, 2),
+        "totale_rimborsi": round(totale_rimborsi, 2),
+    }
