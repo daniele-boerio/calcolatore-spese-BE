@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func
+from datetime import date
 from typing import Optional, List
 from pydantic import BaseModel
 from database import get_db
@@ -13,13 +14,13 @@ router = APIRouter(prefix="/charts", tags=["Charts"])
 
 
 class MonthlyIncomeExpenseOut(BaseModel):
-    mese: int
+    label: str  # Formato "YYYY-MM" o "MM"
     entrate: float
     uscite: float
 
 
 class MonthlySavingsOut(BaseModel):
-    mese: int
+    label: str  # Formato "YYYY-MM" o "MM"
     risparmio: float
 
 
@@ -32,8 +33,40 @@ class ExpenseCompositionOut(BaseModel):
 
 
 class CategoryTrendOut(BaseModel):
-    mese: int
+    label: str  # Formato "YYYY-MM" o "MM"
     spesa: float
+
+
+# --- FUNZIONI DI SUPPORTO ---
+def get_date_range(data_inizio: Optional[date], data_fine: Optional[date]):
+    """Restituisce le date formattate e la flag che indica se superano l'anno"""
+    oggi = date.today()
+    inizio = data_inizio or date(oggi.year, 1, 1)
+    fine = data_fine or date(oggi.year, 12, 31)
+    # Se il range copre più di un anno, mostriamo "YYYY-MM" anziché solo "MM"
+    multi_year = inizio.year != fine.year
+    return inizio, fine, multi_year
+
+
+def generate_month_labels(inizio: date, fine: date, multi_year: bool):
+    """Genera la lista ordinata dei mesi/anni nel range"""
+    labels = []
+    current_year = inizio.year
+    current_month = inizio.month
+
+    while (current_year < fine.year) or (
+        current_year == fine.year and current_month <= fine.month
+    ):
+        if multi_year:
+            labels.append(f"{current_year}-{current_month:02d}")
+        else:
+            labels.append(f"{current_month}")
+
+        current_month += 1
+        if current_month > 12:
+            current_month = 1
+            current_year += 1
+    return labels
 
 
 # --- ENDPOINT ---
@@ -41,111 +74,135 @@ class CategoryTrendOut(BaseModel):
 
 @router.get("/income-expense", response_model=List[MonthlyIncomeExpenseOut])
 def get_chart_income_expense(
-    year: int = Query(..., description="L'anno di riferimento"),
+    data_inizio: Optional[date] = Query(
+        None, description="Data inizio (es: 2026-01-01)"
+    ),
+    data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # Raggruppa per mese e per tipo
+    inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
+
     results = (
         db.query(
+            extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             Transazione.tipo,
             func.sum(Transazione.importo_netto).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,
-            extract("year", Transazione.data) == year,
-            Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi
+            Transazione.data >= inizio,
+            Transazione.data <= fine,
+            Transazione.tipo != "RIMBORSO",
         )
-        .group_by("month", Transazione.tipo)
+        .group_by("year", "month", Transazione.tipo)
         .all()
     )
 
-    # Inizializza i 12 mesi
-    monthly_data = {m: {"mese": m, "entrate": 0.0, "uscite": 0.0} for m in range(1, 13)}
+    labels = generate_month_labels(inizio, fine, multi_year)
+    monthly_data = {
+        label: {"label": label, "entrate": 0.0, "uscite": 0.0} for label in labels
+    }
 
     for row in results:
-        month_idx = int(row.month)
-        if row.tipo == "ENTRATA":
-            monthly_data[month_idx]["entrate"] = float(row.total or 0)
-        elif row.tipo == "USCITA":
-            monthly_data[month_idx]["uscite"] = float(row.total or 0)
+        y = int(row.year)
+        m = int(row.month)
+        label_key = f"{y}-{m:02d}" if multi_year else f"{m}"
+
+        # Filtro extra per sicurezza nel caso i dati cadano fuori dai mesi esatti del range calcolato
+        if label_key in monthly_data:
+            if row.tipo == "ENTRATA":
+                monthly_data[label_key]["entrate"] = float(row.total or 0)
+            elif row.tipo == "USCITA":
+                monthly_data[label_key]["uscite"] = float(row.total or 0)
 
     return list(monthly_data.values())
 
 
 @router.get("/savings", response_model=List[MonthlySavingsOut])
 def get_chart_savings(
-    year: int = Query(..., description="L'anno di riferimento"),
+    data_inizio: Optional[date] = Query(
+        None, description="Data inizio (es: 2026-01-01)"
+    ),
+    data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # Riutilizziamo la stessa query di prima
+    inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
+
     results = (
         db.query(
+            extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             Transazione.tipo,
             func.sum(Transazione.importo_netto).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,
-            extract("year", Transazione.data) == year,
+            Transazione.data >= inizio,
+            Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
         )
-        .group_by("month", Transazione.tipo)
+        .group_by("year", "month", Transazione.tipo)
         .all()
     )
 
-    monthly_data = {m: {"mese": m, "entrate": 0.0, "uscite": 0.0} for m in range(1, 13)}
+    labels = generate_month_labels(inizio, fine, multi_year)
+    monthly_data = {
+        label: {"label": label, "entrate": 0.0, "uscite": 0.0} for label in labels
+    }
 
     for row in results:
-        month_idx = int(row.month)
-        if row.tipo == "ENTRATA":
-            monthly_data[month_idx]["entrate"] = float(row.total or 0)
-        elif row.tipo == "USCITA":
-            monthly_data[month_idx]["uscite"] = float(row.total or 0)
+        y = int(row.year)
+        m = int(row.month)
+        label_key = f"{y}-{m:02d}" if multi_year else f"{m}"
 
-    # Calcoliamo il risparmio netto mensile
+        if label_key in monthly_data:
+            if row.tipo == "ENTRATA":
+                monthly_data[label_key]["entrate"] = float(row.total or 0)
+            elif row.tipo == "USCITA":
+                monthly_data[label_key]["uscite"] = float(row.total or 0)
+
     savings_list = []
-    for m in range(1, 13):
-        data = monthly_data[m]
+    for label in labels:
+        data = monthly_data[label]
         risparmio = data["entrate"] - data["uscite"]
-        savings_list.append({"mese": m, "risparmio": round(risparmio, 2)})
+        savings_list.append({"label": label, "risparmio": round(risparmio, 2)})
 
     return savings_list
 
 
 @router.get("/expense-composition", response_model=List[ExpenseCompositionOut])
 def get_chart_expense_composition(
-    year: int = Query(..., description="L'anno di riferimento"),
-    month: Optional[int] = Query(None, description="Filtra per mese specifico (1-12)"),
+    data_inizio: Optional[date] = Query(
+        None, description="Data inizio (es: 2026-01-01)"
+    ),
+    data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # Raggruppa le uscite per categoria madre
+    inizio, fine, _ = get_date_range(data_inizio, data_fine)
+
     query = (
         db.query(
             Categoria.nome.label("categoria"),
-            # Se vuoi passare il colore potresti aggiungere Categoria.color (se esiste nel tuo modello, non l'ho visto ma lo metto opzionale in schema)
             func.sum(Transazione.importo_netto).label("total"),
         )
         .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
         .filter(
             Transazione.user_id == current_user_id,
-            extract("year", Transazione.data) == year,
+            Transazione.data >= inizio,
+            Transazione.data <= fine,
             Transazione.tipo == "USCITA",
         )
     )
-
-    if month:
-        query = query.filter(extract("month", Transazione.data) == month)
 
     results = query.group_by(Categoria.nome).all()
 
     composition = []
     for row in results:
         label = row.categoria or "Uncategorized"
-        # Se nel tuo modello non c'è il colore sulla categoria, passerà None e verà ignorato
         composition.append(
             {"categoria": label, "totale": round(float(row.total or 0), 2)}
         )
@@ -158,31 +215,42 @@ def get_chart_expense_composition(
 
 @router.get("/category-trend", response_model=List[CategoryTrendOut])
 def get_chart_category_trend(
-    year: int = Query(..., description="L'anno di riferimento"),
     categoria_id: int = Query(..., description="L'ID della categoria da analizzare"),
+    data_inizio: Optional[date] = Query(
+        None, description="Data inizio (es: 2026-01-01)"
+    ),
+    data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
-    # Raggruppa per mese per una specifica categoria
+    inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
+
     results = (
         db.query(
+            extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             func.sum(Transazione.importo_netto).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,
             Transazione.categoria_id == categoria_id,
-            extract("year", Transazione.data) == year,
+            Transazione.data >= inizio,
+            Transazione.data <= fine,
             Transazione.tipo == "USCITA",
         )
-        .group_by("month")
+        .group_by("year", "month")
         .all()
     )
 
-    monthly_data = {m: {"mese": m, "spesa": 0.0} for m in range(1, 13)}
+    labels = generate_month_labels(inizio, fine, multi_year)
+    monthly_data = {label: {"label": label, "spesa": 0.0} for label in labels}
 
     for row in results:
-        month_idx = int(row.month)
-        monthly_data[month_idx]["spesa"] = round(float(row.total or 0), 2)
+        y = int(row.year)
+        m = int(row.month)
+        label_key = f"{y}-{m:02d}" if multi_year else f"{m}"
+
+        if label_key in monthly_data:
+            monthly_data[label_key]["spesa"] = round(float(row.total or 0), 2)
 
     return list(monthly_data.values())
