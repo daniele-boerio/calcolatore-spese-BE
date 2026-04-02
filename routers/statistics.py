@@ -23,6 +23,7 @@ def get_calculated_amount():
 def get_year_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),  # <-- AGGIUNTO
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
@@ -53,6 +54,9 @@ def get_year_details_statistics(
     if categoria_id:
         query = query.filter(Transazione.categoria_id == categoria_id)
 
+    if tag_id:  # <-- AGGIUNTO FILTRO TAG SULLA QUERY PRINCIPALE
+        query = query.filter(Transazione.tag_id == tag_id)
+
     results = query.group_by("month", "label").all()
 
     # Calcolo totali annuali per tipo (usando importo_netto)
@@ -65,6 +69,9 @@ def get_year_details_statistics(
     )
     if categoria_id:
         totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
+
+    if tag_id:  # <-- AGGIUNTO FILTRO TAG SUI TOTALI
+        totals_query = totals_query.filter(Transazione.tag_id == tag_id)
 
     totals_results = totals_query.group_by(Transazione.tipo).all()
 
@@ -98,6 +105,7 @@ def get_month_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     month: int = Query(..., description="Il mese di riferimento (1-12)"),
     categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),  # <-- AGGIUNTO
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
@@ -122,6 +130,9 @@ def get_month_details_statistics(
 
     if categoria_id:
         query = query.filter(Transazione.categoria_id == categoria_id)
+
+    if tag_id:  # <-- AGGIUNTO FILTRO TAG SULLA QUERY PRINCIPALE
+        query = query.filter(Transazione.tag_id == tag_id)
 
     query = query.group_by(
         Categoria.nome,
@@ -185,6 +196,9 @@ def get_month_details_statistics(
     )
     if categoria_id:
         totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
+
+    if tag_id:  # <-- AGGIUNTO FILTRO TAG SUI TOTALI
+        totals_query = totals_query.filter(Transazione.tag_id == tag_id)
 
     totals_results = totals_query.group_by(Transazione.tipo).all()
 
