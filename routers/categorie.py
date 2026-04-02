@@ -3,8 +3,15 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Categoria, Sottocategoria
-from schemas import CategoriaCreate, CategoriaOut, CategoriaUpdate, CategoriaFilters
+from models import Categoria, Sottocategoria, Transazione, Ricorrenza
+from schemas import (
+    CategoriaCreate,
+    CategoriaUpdate,
+    CategoriaOut,
+    CategoriaFilters,
+    CategoriaMigrate,
+)
+from datetime import datetime, timezone
 from services import apply_filters_and_sort
 from sqlalchemy.orm import contains_eager
 
@@ -13,7 +20,7 @@ router = APIRouter(prefix="/categorie", tags=["Categorie"])
 # --- ENDPOINT CATEGORIE ---
 
 
-@router.post("", response_model=CategoriaOut)
+@router.post("", response_model=CategoriaOut, status_code=status.HTTP_201_CREATED)
 def create_categoria(
     categoria: CategoriaCreate,
     db: Session = Depends(get_db),
@@ -121,8 +128,7 @@ def update_categoria(
 
     if not categoria:
         raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Category not found or unauthorized",
+            status_code=status.HTTP_404_NOT_FOUND, detail="Category not found"
         )
 
     try:
@@ -188,4 +194,104 @@ def delete_categoria(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Cannot delete category. Ensure it's not linked to any existing transactions. You should delete or reassign transactions first.",
+        )
+
+
+@router.post("/migrate", status_code=status.HTTP_200_OK)
+def migrate_transactions(
+    payload: CategoriaMigrate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    # 1. Validazione della nuova categoria e sottocategoria
+    new_categoria = (
+        db.query(Categoria)
+        .filter(
+            Categoria.id == payload.new_categoria_id,
+            Categoria.user_id == current_user_id,
+        )
+        .first()
+    )
+
+    if not new_categoria:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="La nuova categoria specificata non esiste o non ti appartiene.",
+        )
+
+    if payload.new_sottocategoria_id:
+        new_sottocategoria = (
+            db.query(Sottocategoria)
+            .filter(
+                Sottocategoria.id == payload.new_sottocategoria_id,
+                Sottocategoria.categoria_id == payload.new_categoria_id,
+                Sottocategoria.user_id == current_user_id,
+            )
+            .first()
+        )
+
+        if not new_sottocategoria:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="La nuova sottocategoria specificata non esiste, non appartiene alla nuova categoria, o non ti appartiene.",
+            )
+
+    try:
+        # 2. Aggiornamento Transazioni
+        tx_query = db.query(Transazione).filter(
+            Transazione.user_id == current_user_id,
+            Transazione.categoria_id == payload.old_categoria_id,
+        )
+        if payload.old_sottocategoria_id:
+            tx_query = tx_query.filter(
+                Transazione.sottocategoria_id == payload.old_sottocategoria_id
+            )
+        else:
+            # Se la vecchia sottocategoria non è specificata (è NULL), aggiorniamo SOLO le transazioni
+            # che non hanno una sottocategoria, altrimenti sposteremmo inavvertitamente anche le transazioni
+            # delle altre sottocategorie figlie di questa categoria.
+            tx_query = tx_query.filter(Transazione.sottocategoria_id.is_(None))
+
+        tx_updated = tx_query.update(
+            {
+                "categoria_id": payload.new_categoria_id,
+                "sottocategoria_id": payload.new_sottocategoria_id,
+                "lastUpdate": datetime.now(timezone.utc),
+            },
+            synchronize_session=False,
+        )
+
+        # 3. Aggiornamento Ricorrenze
+        ric_query = db.query(Ricorrenza).filter(
+            Ricorrenza.user_id == current_user_id,
+            Ricorrenza.categoria_id == payload.old_categoria_id,
+        )
+        if payload.old_sottocategoria_id:
+            ric_query = ric_query.filter(
+                Ricorrenza.sottocategoria_id == payload.old_sottocategoria_id
+            )
+        else:
+            ric_query = ric_query.filter(Ricorrenza.sottocategoria_id.is_(None))
+
+        ric_updated = ric_query.update(
+            {
+                "categoria_id": payload.new_categoria_id,
+                "sottocategoria_id": payload.new_sottocategoria_id,
+                "lastUpdate": datetime.now(timezone.utc),
+            },
+            synchronize_session=False,
+        )
+
+        db.commit()
+        return {
+            "message": "Migrazione completata con successo.",
+            "transazioni_aggiornate": tx_updated,
+            "ricorrenze_aggiornate": ric_updated,
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Errore durante la migrazione: {str(e)}",
         )

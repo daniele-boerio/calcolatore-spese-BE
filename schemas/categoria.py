@@ -47,5 +47,15 @@ class CategoriaFilters:
         self.solo_uscita = solo_uscita
 
     def model_dump(self):
+        return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+class CategoriaMigrate(BaseModel):
+    old_categoria_id: int
+    old_sottocategoria_id: Optional[int] = None
+    new_categoria_id: int
+    new_sottocategoria_id: Optional[int] = None
+
+    def model_dump(self):
         # Mantiene la compatibilità con la tua funzione di filtraggio
         return {k: v for k, v in self.__dict__.items() if v is not None}

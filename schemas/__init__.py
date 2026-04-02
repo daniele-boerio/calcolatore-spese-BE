@@ -22,6 +22,7 @@ from .categoria import (
     CategoriaUpdate,
     CategoriaOut,
     CategoriaFilters,
+    CategoriaMigrate,
 )
 from .sottocategoria import (
     SottocategoriaBase,

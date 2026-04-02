@@ -198,10 +198,11 @@ def task_ricarica_automatica_conti():
     db.close()
 
 
-def apply_filters_and_sort(query: Query, model, filters: BaseModel):
-    # Usiamo exclude_none=True invece di exclude_unset=True per assicurarci di
-    # includere i valori di default (es. sort_by) e i parametri passati.
-    filter_data = filters.model_dump()
+def apply_filters_and_sort(query: Query, model, filters):
+    # Supporta sia BaseModel di Pydantic che classi standard con model_dump()
+    filter_data = (
+        filters.model_dump() if hasattr(filters, "model_dump") else filters.dict()
+    )
 
     sort_by = filter_data.pop("sort_by", None)
 

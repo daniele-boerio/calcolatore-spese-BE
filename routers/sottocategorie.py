@@ -3,11 +3,28 @@ from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Categoria, Sottocategoria
-from schemas import SottocategoriaCreate, SottocategoriaOut, SottocategoriaUpdate
+from schemas import (
+    SottocategoriaCreate,
+    SottocategoriaOut,
+    SottocategoriaUpdate,
+    SottocategoriaFilters,
+)
+from services import apply_filters_and_sort
 
 router = APIRouter(tags=["Sottocategorie"])
 
 # --- ENDPOINT SOTTOCATEGORIE ---
+
+
+@router.get("/sottocategorie", response_model=list[SottocategoriaOut])
+def get_sottocategorie(
+    filters: SottocategoriaFilters = Depends(),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    query = db.query(Sottocategoria).filter(Sottocategoria.user_id == current_user_id)
+    query = apply_filters_and_sort(query, Sottocategoria, filters=filters)
+    return query.all()
 
 
 @router.post(
