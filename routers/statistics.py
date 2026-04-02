@@ -55,12 +55,13 @@ def get_year_details_statistics(
 
     results = query.group_by("month", "label").all()
 
-    # Calcolo totali annuali per tipo
+    # Calcolo totali annuali per tipo (usando importo_netto)
     totals_query = db.query(
-        Transazione.tipo, func.sum(Transazione.importo).label("total")
+        Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
         extract("year", Transazione.data) == year,
+        Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
     )
     if categoria_id:
         totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
@@ -69,15 +70,12 @@ def get_year_details_statistics(
 
     totale_entrata = 0.0
     totale_uscita = 0.0
-    totale_rimborsi = 0.0
 
     for row in totals_results:
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
             totale_uscita = float(row.total or 0)
-        elif row.tipo == "RIMBORSO":
-            totale_rimborsi = float(row.total or 0)
 
     # 3. Costruzione dizionario mensile pre-riempito (comprensione del dizionario)
     monthly_data = {m: {"month": m} for m in range(1, 13)}
@@ -92,7 +90,6 @@ def get_year_details_statistics(
         "data": list(monthly_data.values()),
         "totale_entrata": round(totale_entrata, 2),
         "totale_uscita": round(totale_uscita, 2),
-        "totale_rimborsi": round(totale_rimborsi, 2),
     }
 
 
@@ -119,7 +116,7 @@ def get_month_details_statistics(
             Transazione.user_id == current_user_id,
             extract("year", Transazione.data) == year,
             extract("month", Transazione.data) == month,
-            Transazione.tipo != "RIMBORSO",
+            Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
         )
     )
 
@@ -177,13 +174,14 @@ def get_month_details_statistics(
         cat["sottocategorie"].sort(key=lambda x: x["sottocategoria"])
         details_list.append(cat)
 
-    # Calcolo totali mensili per tipo
+    # Calcolo totali mensili per tipo (usando importo_netto)
     totals_query = db.query(
-        Transazione.tipo, func.sum(Transazione.importo).label("total")
+        Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
         extract("year", Transazione.data) == year,
         extract("month", Transazione.data) == month,
+        Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
     )
     if categoria_id:
         totals_query = totals_query.filter(Transazione.categoria_id == categoria_id)
@@ -192,19 +190,15 @@ def get_month_details_statistics(
 
     totale_entrata = 0.0
     totale_uscita = 0.0
-    totale_rimborsi = 0.0
 
     for row in totals_results:
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
             totale_uscita = float(row.total or 0)
-        elif row.tipo == "RIMBORSO":
-            totale_rimborsi = float(row.total or 0)
 
     return {
         "data": details_list,
         "totale_entrata": round(totale_entrata, 2),
         "totale_uscita": round(totale_uscita, 2),
-        "totale_rimborsi": round(totale_rimborsi, 2),
     }
