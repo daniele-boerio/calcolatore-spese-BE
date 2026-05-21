@@ -209,7 +209,7 @@ def get_month_details_statistics(
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
-            totale_uscita = float(row.total or 0)
+            totale_uscita = -float(row.total or 0)
 
     return {
         "data": details_list,
