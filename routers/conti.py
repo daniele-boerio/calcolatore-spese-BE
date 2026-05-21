@@ -1,6 +1,6 @@
 from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
@@ -155,13 +155,32 @@ def get_current_month_expenses(
     _, last_day_num = calendar.monthrange(today.year, today.month)
     last_day = today.replace(day=last_day_num)
 
-    # 1. Totale USCITE nel mese
-    total_out = db.query(func.sum(Transazione.importo_netto)).join(Conto).filter(
+    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
+
+    total_out = db.query(func.sum(amount_expr)).join(Conto).filter(
         Conto.user_id == current_user_id,
         Transazione.tipo == TipoTransazione.USCITA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
+
+    total_in = db.query(func.sum(amount_expr)).join(Conto).filter(
+        Conto.user_id == current_user_id,
+        Transazione.tipo == TipoTransazione.ENTRATA,
+        Transazione.data >= first_day,
+        Transazione.data <= last_day,
+    ).scalar() or Decimal("0")
+
+    total_other = db.query(func.sum(amount_expr)).join(Conto).filter(
+        Conto.user_id == current_user_id,
+        Transazione.tipo != TipoTransazione.USCITA,
+        Transazione.tipo != TipoTransazione.ENTRATA,
+        Transazione.tipo != TipoTransazione.RIMBORSO,
+        Transazione.data >= first_day,
+        Transazione.data <= last_day,
+    ).scalar() or Decimal("0")
+
+    net_expenses = total_in + total_other - total_out
 
     if include_future_recurring:
         recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(
@@ -171,7 +190,6 @@ def get_current_month_expenses(
             Ricorrenza.prossima_esecuzione >= today,
             Ricorrenza.prossima_esecuzione <= last_day,
         ).scalar() or Decimal("0")
-        total_out += recurring_out
 
         recurring_in = db.query(func.sum(Ricorrenza.importo)).filter(
             Ricorrenza.user_id == current_user_id,
@@ -180,19 +198,8 @@ def get_current_month_expenses(
             Ricorrenza.prossima_esecuzione >= today,
             Ricorrenza.prossima_esecuzione <= last_day,
         ).scalar() or Decimal("0")
-    else:
-        recurring_in = Decimal("0")
 
-    total_in = db.query(func.sum(Transazione.importo_netto)).join(Conto).filter(
-        Conto.user_id == current_user_id,
-        Transazione.tipo == TipoTransazione.ENTRATA,
-        Transazione.data >= first_day,
-        Transazione.data <= last_day,
-    ).scalar() or Decimal("0")
-
-    total_in += recurring_in
-
-    net_expenses = total_in - total_out
+        net_expenses += recurring_in - recurring_out
 
     percentage = None
     if user.total_budget and user.total_budget > Decimal("0"):
