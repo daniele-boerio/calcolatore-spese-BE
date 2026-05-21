@@ -185,6 +185,10 @@ def get_month_details_statistics(
         cat["sottocategorie"].sort(key=lambda x: x["sottocategoria"])
         details_list.append(cat)
 
+    totale_altro = sum(
+        float(cat["totale"] or 0) for cat in details_list if cat["tipo"] == "OTHER"
+    )
+
     # Calcolo totali mensili per tipo (usando importo_netto)
     totals_query = db.query(
         Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
@@ -215,4 +219,5 @@ def get_month_details_statistics(
         "data": details_list,
         "totale_entrata": round(totale_entrata, 2),
         "totale_uscita": round(totale_uscita, 2),
+        "totale_altro": round(totale_altro, 2),
     }
