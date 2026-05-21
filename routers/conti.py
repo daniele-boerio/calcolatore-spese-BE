@@ -1,10 +1,10 @@
 from datetime import date
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Conto, Transazione, User
+from models import Conto, Transazione, User, Ricorrenza
 from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
 from schemas.transazione import TipoTransazione
 from services import apply_filters_and_sort
@@ -133,6 +133,10 @@ def delete_conto(
 
 @router.get("/currentMonthExpenses")
 def get_current_month_expenses(
+    include_future_recurring: bool = Query(
+        False,
+        description="Include future active recurring expenses within the current month",
+    ),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
@@ -159,12 +163,34 @@ def get_current_month_expenses(
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
 
+    if include_future_recurring:
+        recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(
+            Ricorrenza.user_id == current_user_id,
+            Ricorrenza.tipo == TipoTransazione.USCITA,
+            Ricorrenza.attiva,
+            Ricorrenza.prossima_esecuzione >= today,
+            Ricorrenza.prossima_esecuzione <= last_day,
+        ).scalar() or Decimal("0")
+        total_out += recurring_out
+
+        recurring_in = db.query(func.sum(Ricorrenza.importo)).filter(
+            Ricorrenza.user_id == current_user_id,
+            Ricorrenza.tipo == TipoTransazione.ENTRATA,
+            Ricorrenza.attiva,
+            Ricorrenza.prossima_esecuzione >= today,
+            Ricorrenza.prossima_esecuzione <= last_day,
+        ).scalar() or Decimal("0")
+    else:
+        recurring_in = Decimal("0")
+
     total_in = db.query(func.sum(Transazione.importo_netto)).join(Conto).filter(
         Conto.user_id == current_user_id,
         Transazione.tipo == TipoTransazione.ENTRATA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
+
+    total_in += recurring_in
 
     net_expenses = total_in - total_out
 
