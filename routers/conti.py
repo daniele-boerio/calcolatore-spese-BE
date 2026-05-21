@@ -180,7 +180,7 @@ def get_current_month_expenses(
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
 
-    net_expenses = total_in + total_other - total_out
+    remaining_amount = total_in + total_other - total_out
 
     if include_future_recurring:
         recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(
@@ -199,17 +199,17 @@ def get_current_month_expenses(
             Ricorrenza.prossima_esecuzione <= last_day,
         ).scalar() or Decimal("0")
 
-        net_expenses += recurring_in - recurring_out
+        remaining_amount += recurring_in - recurring_out
 
     percentage = None
     if user.total_budget and user.total_budget > Decimal("0"):
-        # Calcolo percentuale: trasformiamo in float solo alla fine per l'arrotondamento
-        percentage = round(float(net_expenses / user.total_budget * 100), 1)
+        # Calcolo percentuale del risparmio rispetto all'obiettivo
+        percentage = round(float(remaining_amount / user.total_budget * 100), 1)
 
     return {
         "monthly_budget": {
             "total_budget": user.total_budget,
-            "expenses": net_expenses,  # Pydantic arrotonderà a 2 cifre
+            "remaining": remaining_amount,
             "percentage": percentage,
             "period": {"start": first_day, "end": last_day},
         }
