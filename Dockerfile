@@ -1,5 +1,5 @@
-# Usa un'immagine Python leggera e recente
-FROM python:3.14-slim
+# Usa un'immagine Python leggera e stabile (3.12 ha wheel precompilate per tutte le dipendenze)
+FROM python:3.12-slim
 
 # Imposta variabili d'ambiente per evitare file .pyc e forzare l'output log
 ENV PYTHONDONTWRITEBYTECODE=1
@@ -8,10 +8,9 @@ ENV PYTHONUNBUFFERED=1
 # Imposta la cartella di lavoro
 WORKDIR /app
 
-# Installa le dipendenze di sistema necessarie per psycopg2 e l'health check
-RUN apt-get update && apt-get install -y \
-    libpq-dev \
-    gcc \
+# Installa solo curl per l'health check.
+# psycopg2-binary usa wheel precompilate: gcc e libpq-dev NON servono.
+RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
