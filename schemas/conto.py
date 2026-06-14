@@ -16,6 +16,11 @@ class ContoBase(BaseModel):
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
     default: bool = False
+    bank_connector_provider: Optional[str] = None
+    bank_connector_account_id: Optional[str] = None
+    bank_connector_institution_id: Optional[str] = None
+    bank_connector_last_sync: Optional[datetime] = None
+    bank_connector_last_error: Optional[str] = None
 
     # Validatore universale per i campi monetari del conto
     @field_validator("saldo", "budget_obiettivo", "soglia_minima", mode="after")
@@ -41,6 +46,10 @@ class ContoUpdate(BaseModel):
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
     default: Optional[bool] = None
+    bank_connector_provider: Optional[str] = None
+    bank_connector_account_id: Optional[str] = None
+    bank_connector_institution_id: Optional[str] = None
+    bank_connector_last_sync: Optional[datetime] = None
 
     @field_validator("saldo", "budget_obiettivo", "soglia_minima", mode="after")
     @classmethod

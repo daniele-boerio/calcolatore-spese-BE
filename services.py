@@ -1,4 +1,8 @@
+import base64
+import os
+import requests
 import yfinance as yf
+from cryptography.fernet import Fernet, InvalidToken
 from datetime import date, timedelta, datetime
 import logging
 from database import SessionLocal
@@ -12,6 +16,43 @@ from decimal import Decimal
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def get_bank_connector_cipher():
+    key = os.getenv("BANK_CONNECTOR_ENCRYPTION_KEY")
+    if not key:
+        return None
+    try:
+        return Fernet(key.encode())
+    except Exception:
+        try:
+            return Fernet(base64.urlsafe_b64encode(key.encode()))
+        except Exception:
+            logger.warning(
+                "Invalid BANK_CONNECTOR_ENCRYPTION_KEY; storing bank tokens without encryption"
+            )
+            return None
+
+
+def encrypt_token(value: str) -> str | None:
+    if value is None:
+        return None
+    cipher = get_bank_connector_cipher()
+    if cipher:
+        return cipher.encrypt(value.encode()).decode()
+    return value
+
+
+def decrypt_token(value: str) -> str | None:
+    if value is None:
+        return None
+    cipher = get_bank_connector_cipher()
+    if cipher:
+        try:
+            return cipher.decrypt(value.encode()).decode()
+        except InvalidToken:
+            return value
+    return value
 
 
 def get_live_price(ticker_symbol: str, isin_code: str):
@@ -196,6 +237,277 @@ def task_ricarica_automatica_conti():
 
     db.commit()
     db.close()
+
+
+def get_nordigen_access_token(client_id: str, secret: str) -> tuple[str, str]:
+    url = "https://ob.nordigen.com/api/v2/token/new/"
+    payload = {"secret_id": client_id, "secret_key": secret}
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    return data.get("access"), data.get("refresh")
+
+
+def refresh_nordigen_access_token(refresh_token: str) -> tuple[str, str]:
+    url = "https://ob.nordigen.com/api/v2/token/refresh/"
+    payload = {"refresh": refresh_token}
+    response = requests.post(url, json=payload, timeout=30)
+    response.raise_for_status()
+    data = response.json()
+    return data.get("access"), data.get("refresh")
+
+
+def fetch_nordigen_transactions(
+    account_id: str, access_token: str, since: datetime, until: datetime
+):
+    url = f"https://ob.nordigen.com/api/v2/accounts/{account_id}/transactions/"
+    headers = {"Authorization": f"Bearer {access_token}", "Accept": "application/json"}
+    params = {
+        "date_from": since.date().isoformat(),
+        "date_to": until.date().isoformat(),
+    }
+    response = requests.get(url, headers=headers, params=params, timeout=30)
+    response.raise_for_status()
+    payload = response.json()
+    transactions = []
+
+    booked = payload.get("transactions", {}).get("booked", [])
+    for tx in booked:
+        amount = Decimal(tx.get("transactionAmount", {}).get("amount", "0"))
+        if amount == 0:
+            continue
+        tipo = "USCITA" if amount < 0 else "ENTRATA"
+        amount = abs(amount)
+        descrizione = tx.get("remittanceInformationUnstructured") or tx.get(
+            "remittanceInformationUnstructuredArray", []
+        )
+        if isinstance(descrizione, list):
+            descrizione = " ".join(descrizione)
+        descrizione = (
+            descrizione
+            or tx.get("bookingText")
+            or tx.get("creditorName")
+            or tx.get("debtorName")
+        )
+        booking_date = tx.get("bookingDate") or tx.get("valueDate")
+        if booking_date:
+            booking_date_obj = datetime.fromisoformat(booking_date).date()
+        else:
+            booking_date_obj = since.date()
+        transactions.append(
+            {
+                "external_id": tx.get("transactionId")
+                or tx.get("endToEndId")
+                or f"{booking_date_obj}-{amount}-{descrizione}",
+                "tipo": tipo,
+                "data": booking_date_obj,
+                "importo": amount,
+                "descrizione": descrizione,
+                "provider": "NORDIGEN",
+            }
+        )
+    return transactions
+
+
+def fetch_bank_transactions_for_conto(db, conto):
+    if not conto.bank_connector_provider:
+        raise ValueError("Bank connector provider not configured")
+
+    since = conto.bank_connector_last_sync or (datetime.now() - timedelta(days=30))
+    until = datetime.now()
+
+    if conto.bank_connector_provider == "NORDIGEN":
+        if (
+            not conto.bank_connector_account_id
+            or not conto.bank_connector_client_id
+            or not conto.bank_connector_secret
+        ):
+            raise ValueError(
+                "Nordigen connector requires account_id, client_id and secret credentials"
+            )
+
+        account_id = conto.bank_connector_account_id
+        client_id = conto.bank_connector_client_id
+        secret = conto.bank_connector_secret
+        access_token = decrypt_token(conto.bank_connector_access_token)
+        refresh_token = decrypt_token(conto.bank_connector_refresh_token)
+
+        if not access_token:
+            access_token, refresh_token = get_nordigen_access_token(client_id, secret)
+
+        try:
+            transactions = fetch_nordigen_transactions(
+                account_id, access_token, since, until
+            )
+        except requests.HTTPError as error:
+            if (
+                error.response is not None
+                and error.response.status_code in (401, 403)
+                and refresh_token
+            ):
+                access_token, refresh_token = refresh_nordigen_access_token(
+                    refresh_token
+                )
+                transactions = fetch_nordigen_transactions(
+                    account_id, access_token, since, until
+                )
+            else:
+                raise
+
+        if access_token:
+            conto.bank_connector_access_token = encrypt_token(access_token)
+        if refresh_token:
+            conto.bank_connector_refresh_token = encrypt_token(refresh_token)
+
+        conto.bank_connector_last_sync = datetime.now()
+        conto.bank_connector_last_error = None
+        db.add(conto)
+        db.commit()
+        return transactions
+    elif conto.bank_connector_provider == "MOCK":
+        return [
+            {
+                "external_id": f"mock-{i}-{since.date()}",
+                "provider": "MOCK",
+                "tipo": "USCITA",
+                "data": since.date(),
+                "importo": Decimal("10.00") * (i + 1),
+                "descrizione": f"Mock bank transaction {i + 1}",
+            }
+            for i in range(3)
+        ]
+    else:
+        raise ValueError(
+            f"Unsupported bank connector provider: {conto.bank_connector_provider}"
+        )
+
+
+def create_bank_transaction_proposal(db, user_id, conto, candidate):
+    if candidate.get("external_id"):
+        existing = (
+            db.query(models.BankTransactionProposal)
+            .filter(
+                models.BankTransactionProposal.user_id == user_id,
+                models.BankTransactionProposal.conto_id == conto.id,
+                models.BankTransactionProposal.provider == candidate.get("provider"),
+                models.BankTransactionProposal.external_id
+                == candidate.get("external_id"),
+            )
+            .first()
+        )
+        if existing:
+            return None
+
+    duplicate = (
+        db.query(models.BankTransactionProposal)
+        .filter(
+            models.BankTransactionProposal.user_id == user_id,
+            models.BankTransactionProposal.conto_id == conto.id,
+            models.BankTransactionProposal.data == candidate.get("data"),
+            models.BankTransactionProposal.importo == candidate.get("importo"),
+            models.BankTransactionProposal.descrizione == candidate.get("descrizione"),
+            models.BankTransactionProposal.status != "DISCARDED",
+        )
+        .first()
+    )
+    if duplicate:
+        return None
+
+    proposal = models.BankTransactionProposal(
+        user_id=user_id,
+        conto_id=conto.id,
+        provider=candidate.get("provider"),
+        external_id=candidate.get("external_id"),
+        tipo=candidate.get("tipo"),
+        data=candidate.get("data"),
+        importo=candidate.get("importo"),
+        descrizione=candidate.get("descrizione"),
+        status="PENDING",
+    )
+    db.add(proposal)
+    return proposal
+
+
+def import_bank_transaction_proposal(db, proposal, import_data, current_user_id):
+    from datetime import date
+    from models import Transazione, Conto, Categoria, Sottocategoria
+
+    conto = db.query(Conto).filter(Conto.id == proposal.conto_id).first()
+    if not conto:
+        raise ValueError("Associated account not found")
+
+    tipo = proposal.tipo
+    importo = proposal.importo
+    if tipo not in ["USCITA", "ENTRATA", "RIMBORSO"]:
+        tipo = "USCITA"
+
+    new_trans = Transazione(
+        importo=importo,
+        importo_netto=importo,
+        tipo=tipo,
+        data=proposal.data,
+        descrizione=import_data.descrizione or proposal.descrizione,
+        conto_id=proposal.conto_id,
+        user_id=current_user_id,
+        categoria_id=import_data.categoria_id,
+        sottocategoria_id=import_data.sottocategoria_id,
+        tag_id=import_data.tag_id,
+    )
+
+    modifier = Decimal("-1") if tipo == "USCITA" else Decimal("1")
+    conto.saldo += importo * modifier
+
+    db.add(new_trans)
+    db.flush()
+
+    proposal.status = "IMPORTED"
+    proposal.imported_transaction_id = new_trans.id
+    db.add(conto)
+    db.add(proposal)
+    return new_trans
+
+
+def task_sync_bank_connectors():
+    db = SessionLocal()
+    try:
+        conti = (
+            db.query(models.Conto)
+            .filter(models.Conto.bank_connector_provider != None)
+            .all()
+        )
+
+        for conto in conti:
+            try:
+                candidates = fetch_bank_transactions_for_conto(db, conto)
+                proposals_created = 0
+                for candidate in candidates:
+                    if create_bank_transaction_proposal(
+                        db, conto.user_id, conto, candidate
+                    ):
+                        proposals_created += 1
+                if proposals_created:
+                    logger.info(
+                        f"Bank sync for conto {conto.id}: created {proposals_created} proposals"
+                    )
+            except Exception as e:
+                conto.bank_connector_last_error = str(e)
+                db.add(conto)
+                db.commit()
+                logger.error(f"Bank sync failed for conto {conto.id}: {e}")
+                continue
+
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Fatal error in task_sync_bank_connectors: {e}")
+    finally:
+        db.close()
+
+
+def discard_bank_transaction_proposal(db, proposal):
+    proposal.status = "DISCARDED"
+    db.add(proposal)
+    return proposal
 
 
 def apply_filters_and_sort(query: Query, model, filters):

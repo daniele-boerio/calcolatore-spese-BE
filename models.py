@@ -81,6 +81,40 @@ class Conto(Base):
     )
     lastImport = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    bank_connector_provider = Column(String, nullable=True)
+    bank_connector_account_id = Column(String, nullable=True)
+    bank_connector_institution_id = Column(String, nullable=True)
+    bank_connector_client_id = Column(String, nullable=True)
+    bank_connector_secret = Column(String, nullable=True)
+    bank_connector_access_token = Column(String, nullable=True)
+    bank_connector_refresh_token = Column(String, nullable=True)
+    bank_connector_last_sync = Column(DateTime, nullable=True)
+    bank_connector_last_error = Column(String, nullable=True)
+
+
+class BankTransactionProposal(Base):
+    __tablename__ = "bank_transaction_proposals"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
+    provider = Column(String, nullable=False)
+    external_id = Column(String, nullable=True, index=True)
+    tipo = Column(String, nullable=False)
+    data = Column(Date, nullable=False)
+    importo = Column(Numeric(10, 2), nullable=False)
+    descrizione = Column(String, nullable=True)
+    status = Column(String, nullable=False, default="PENDING")
+    imported_transaction_id = Column(
+        Integer, ForeignKey("transazioni.id"), nullable=True
+    )
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
 
 class Categoria(Base):
     __tablename__ = "categorie"

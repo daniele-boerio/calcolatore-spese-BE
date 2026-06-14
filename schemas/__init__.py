@@ -70,3 +70,11 @@ from .debito import (
     DebitoUpdate,
     DebitoOut,
 )
+from .bank_transaction import (
+    BankConnectorConfigCreate,
+    BankConnectorConfigOut,
+    BankConnectorConfigUpdate,
+    BankConnectorSyncResponse,
+    BankTransactionProposalImport,
+    BankTransactionProposalOut,
+)

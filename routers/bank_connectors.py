@@ -1,0 +1,256 @@
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlalchemy.orm import Session
+from database import get_db
+import auth
+from schemas.bank_transaction import (
+    BankConnectorConfigCreate,
+    BankConnectorConfigOut,
+    BankConnectorConfigUpdate,
+    BankConnectorSyncResponse,
+    BankTransactionProposalOut,
+    BankTransactionProposalImport,
+)
+from schemas.transazione import TransazioneOut
+from models import Conto, BankTransactionProposal, Categoria, Sottocategoria
+from services import (
+    fetch_bank_transactions_for_conto,
+    create_bank_transaction_proposal,
+    import_bank_transaction_proposal,
+    discard_bank_transaction_proposal,
+    encrypt_token,
+)
+from datetime import datetime, timezone
+from decimal import Decimal
+
+router = APIRouter(prefix="/conti/{conto_id}/bank-connector", tags=["BankConnector"])
+
+
+def get_conto(db: Session, conto_id: int, user_id: int) -> Conto:
+    conto = (
+        db.query(Conto).filter(Conto.id == conto_id, Conto.user_id == user_id).first()
+    )
+    if not conto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or not authorized",
+        )
+    return conto
+
+
+@router.get("", response_model=BankConnectorConfigOut)
+def get_bank_connector_config(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    conto = get_conto(db, conto_id, current_user_id)
+    return BankConnectorConfigOut(
+        provider=conto.bank_connector_provider,
+        account_id=conto.bank_connector_account_id,
+        institution_id=conto.bank_connector_institution_id,
+        last_sync=conto.bank_connector_last_sync,
+        last_error=conto.bank_connector_last_error,
+    )
+
+
+@router.post("", response_model=BankConnectorConfigOut)
+def configure_bank_connector(
+    conto_id: int,
+    config: BankConnectorConfigCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    conto = get_conto(db, conto_id, current_user_id)
+
+    if config.provider == "NORDIGEN":
+        if not config.account_id or not config.client_id or not config.secret:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Nordigen configuration requires account_id, client_id and secret",
+            )
+
+    conto.bank_connector_provider = config.provider
+    conto.bank_connector_account_id = config.account_id
+    conto.bank_connector_institution_id = config.institution_id
+    conto.bank_connector_client_id = config.client_id
+    conto.bank_connector_secret = config.secret
+    conto.bank_connector_access_token = encrypt_token(config.access_token)
+    conto.bank_connector_refresh_token = encrypt_token(config.refresh_token)
+    conto.bank_connector_last_error = None
+
+    db.add(conto)
+    db.commit()
+    db.refresh(conto)
+
+    return BankConnectorConfigOut(
+        provider=conto.bank_connector_provider,
+        account_id=conto.bank_connector_account_id,
+        institution_id=conto.bank_connector_institution_id,
+        last_sync=conto.bank_connector_last_sync,
+        last_error=conto.bank_connector_last_error,
+    )
+
+
+@router.post("/sync", response_model=BankConnectorSyncResponse)
+def sync_bank_connector(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    conto = get_conto(db, conto_id, current_user_id)
+
+    if not conto.bank_connector_provider:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Bank connector is not configured for this account",
+        )
+
+    try:
+        candidates = fetch_bank_transactions_for_conto(db, conto)
+    except Exception as e:
+        conto.bank_connector_last_error = str(e)
+        db.add(conto)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Failed to fetch bank transactions: {str(e)}",
+        )
+
+    new_proposals = 0
+    for candidate in candidates:
+        proposal = create_bank_transaction_proposal(
+            db, current_user_id, conto, candidate
+        )
+        if proposal:
+            new_proposals += 1
+
+    now = datetime.now(timezone.utc)
+    conto.bank_connector_last_sync = now
+    conto.bank_connector_last_error = None
+    db.add(conto)
+    db.commit()
+
+    return BankConnectorSyncResponse(
+        new_proposals=new_proposals, last_sync=now, until=now
+    )
+
+
+@router.get("/proposals", response_model=list[BankTransactionProposalOut])
+def get_bank_transaction_proposals(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    get_conto(db, conto_id, current_user_id)
+
+    proposals = (
+        db.query(BankTransactionProposal)
+        .filter(
+            BankTransactionProposal.conto_id == conto_id,
+            BankTransactionProposal.user_id == current_user_id,
+            BankTransactionProposal.status == "PENDING",
+        )
+        .order_by(BankTransactionProposal.creationDate.desc())
+        .all()
+    )
+    return proposals
+
+
+def update_category_usage(
+    db: Session, categoria_id: int = None, sottocategoria_id: int = None
+):
+    now = datetime.now(timezone.utc)
+    if categoria_id:
+        db.query(Categoria).filter(Categoria.id == categoria_id).update(
+            {"lastImport": now}
+        )
+    if sottocategoria_id:
+        db.query(Sottocategoria).filter(Sottocategoria.id == sottocategoria_id).update(
+            {"lastImport": now}
+        )
+
+
+@router.post("/proposals/{proposal_id}/import", response_model=TransazioneOut)
+def import_bank_transaction_proposal_endpoint(
+    conto_id: int,
+    proposal_id: int,
+    import_data: BankTransactionProposalImport,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    conto = get_conto(db, conto_id, current_user_id)
+    proposal = (
+        db.query(BankTransactionProposal)
+        .filter(
+            BankTransactionProposal.id == proposal_id,
+            BankTransactionProposal.conto_id == conto_id,
+            BankTransactionProposal.user_id == current_user_id,
+        )
+        .first()
+    )
+
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proposal not found",
+        )
+
+    if proposal.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PENDING proposals can be imported",
+        )
+
+    try:
+        new_trans = import_bank_transaction_proposal(
+            db, proposal, import_data, current_user_id
+        )
+        update_category_usage(
+            db, import_data.categoria_id, import_data.sottocategoria_id
+        )
+        conto.lastImport = datetime.now(timezone.utc)
+        db.add(conto)
+        db.commit()
+        db.refresh(new_trans)
+        return new_trans
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to import proposal: {str(e)}",
+        )
+
+
+@router.post("/proposals/{proposal_id}/discard")
+def discard_bank_transaction_proposal_endpoint(
+    conto_id: int,
+    proposal_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    get_conto(db, conto_id, current_user_id)
+    proposal = (
+        db.query(BankTransactionProposal)
+        .filter(
+            BankTransactionProposal.id == proposal_id,
+            BankTransactionProposal.conto_id == conto_id,
+            BankTransactionProposal.user_id == current_user_id,
+        )
+        .first()
+    )
+
+    if not proposal:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Proposal not found",
+        )
+
+    if proposal.status != "PENDING":
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Only PENDING proposals can be discarded",
+        )
+
+    discard_bank_transaction_proposal(db, proposal)
+    db.commit()
+    return {"message": "Proposal discarded"}

@@ -5,6 +5,7 @@ from services import (
     task_aggiornamento_prezzi,
     task_transazioni_ricorrenti,
     task_ricarica_automatica_conti,
+    task_sync_bank_connectors,
 )
 from routers import (
     auth,
@@ -18,7 +19,8 @@ from routers import (
     debiti,
     ricorrenze,
     statistics,
-    charts,  # Aggiunto nuovo router
+    charts,
+    bank_connectors,
 )
 
 app = FastAPI(
@@ -45,6 +47,7 @@ app.include_router(tag.router)  # Tag
 app.include_router(ricorrenze.router)  # Ricorrenze
 app.include_router(statistics.router)  # Statistiche
 app.include_router(charts.router)  # API Grafici
+app.include_router(bank_connectors.router)  # Connettore bancario
 app.include_router(debiti.router)  # Debiti
 app.include_router(auth.router)  # Endpoint per forgot-password e reset-password
 
@@ -53,6 +56,7 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(task_aggiornamento_prezzi, "cron", hour=2, minute=0)
 scheduler.add_job(task_transazioni_ricorrenti, "cron", hour=3, minute=0)
 scheduler.add_job(task_ricarica_automatica_conti, "cron", hour=4, minute=0)
+scheduler.add_job(task_sync_bank_connectors, "cron", hour="*/1")
 
 
 @app.on_event("startup")
