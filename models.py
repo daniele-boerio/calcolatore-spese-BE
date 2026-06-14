@@ -159,7 +159,9 @@ class Debito(Base):
     descrizione = Column(String, nullable=True)
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
-    conto_id = Column(Integer, ForeignKey("conti.id", ondelete="SET NULL"), nullable=True)
+    conto_id = Column(
+        Integer, ForeignKey("conti.id", ondelete="SET NULL"), nullable=True
+    )
 
     transazioni = relationship(
         "Transazione",
@@ -191,7 +193,9 @@ class Transazione(Base):
         Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True
     )
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
-    debito_id = Column(Integer, ForeignKey("debiti.id", ondelete="SET NULL"), nullable=True)
+    debito_id = Column(
+        Integer, ForeignKey("debiti.id", ondelete="SET NULL"), nullable=True
+    )
 
     # per i rimborsi, collega la transazione al padre
     parent_transaction_id = Column(

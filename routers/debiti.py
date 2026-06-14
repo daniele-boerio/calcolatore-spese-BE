@@ -12,15 +12,26 @@ router = APIRouter(prefix="/debiti", tags=["Debiti"])
 
 
 @router.get("", response_model=list[DebitoOut])
-def list_debiti(db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+def list_debiti(
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
     return db.query(Debito).filter(Debito.user_id == current_user_id).all()
 
 
 @router.post("", response_model=DebitoOut)
-def create_debito(debito: DebitoCreate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
+def create_debito(
+    debito: DebitoCreate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
     # Se conto_id è passato, verifichiamo che esista e appartenga all'utente
     if debito.conto_id:
-        conto = db.query(Conto).filter(Conto.id == debito.conto_id, Conto.user_id == current_user_id).first()
+        conto = (
+            db.query(Conto)
+            .filter(Conto.id == debito.conto_id, Conto.user_id == current_user_id)
+            .first()
+        )
         if not conto:
             raise HTTPException(status_code=404, detail="Associated account not found")
 
@@ -45,15 +56,31 @@ def create_debito(debito: DebitoCreate, db: Session = Depends(get_db), current_u
 
 
 @router.put("/{debito_id}", response_model=DebitoOut)
-def update_debito(debito_id: int, data: DebitoUpdate, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    db_debito = db.query(Debito).filter(Debito.id == debito_id, Debito.user_id == current_user_id).first()
+def update_debito(
+    debito_id: int,
+    data: DebitoUpdate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    db_debito = (
+        db.query(Debito)
+        .filter(Debito.id == debito_id, Debito.user_id == current_user_id)
+        .first()
+    )
     if not db_debito:
         raise HTTPException(status_code=404, detail="Debito not found")
 
     update_data = data.model_dump(exclude_unset=True)
     # If conto_id provided, validate ownership
     if "conto_id" in update_data and update_data.get("conto_id"):
-        conto = db.query(Conto).filter(Conto.id == update_data.get("conto_id"), Conto.user_id == current_user_id).first()
+        conto = (
+            db.query(Conto)
+            .filter(
+                Conto.id == update_data.get("conto_id"),
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
         if not conto:
             raise HTTPException(status_code=404, detail="Associated account not found")
 
@@ -76,13 +103,25 @@ def update_debito(debito_id: int, data: DebitoUpdate, db: Session = Depends(get_
 
 
 @router.delete("/{debito_id}")
-def delete_debito(debito_id: int, force: bool = False, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    db_debito = db.query(Debito).filter(Debito.id == debito_id, Debito.user_id == current_user_id).first()
+def delete_debito(
+    debito_id: int,
+    force: bool = False,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    db_debito = (
+        db.query(Debito)
+        .filter(Debito.id == debito_id, Debito.user_id == current_user_id)
+        .first()
+    )
     if not db_debito:
         raise HTTPException(status_code=404, detail="Debito not found")
 
     if db_debito.residuo and db_debito.residuo > Decimal("0") and not force:
-        raise HTTPException(status_code=400, detail="Debito has remaining amount; use force=true to delete")
+        raise HTTPException(
+            status_code=400,
+            detail="Debito has remaining amount; use force=true to delete",
+        )
 
     try:
         db.delete(db_debito)
@@ -105,8 +144,17 @@ class DebitoPay(BaseModel):
 
 
 @router.post("/{debito_id}/pay", response_model=TransazioneOut)
-def pay_debito(debito_id: int, body: DebitoPay, db: Session = Depends(get_db), current_user_id: int = Depends(auth.get_current_user_id)):
-    db_debito = db.query(Debito).filter(Debito.id == debito_id, Debito.user_id == current_user_id).first()
+def pay_debito(
+    debito_id: int,
+    body: DebitoPay,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    db_debito = (
+        db.query(Debito)
+        .filter(Debito.id == debito_id, Debito.user_id == current_user_id)
+        .first()
+    )
     if not db_debito:
         raise HTTPException(status_code=404, detail="Debito not found")
 
@@ -115,7 +163,11 @@ def pay_debito(debito_id: int, body: DebitoPay, db: Session = Depends(get_db), c
     if not conto_id:
         raise HTTPException(status_code=400, detail="No account specified for payment")
 
-    conto = db.query(Conto).filter(Conto.id == conto_id, Conto.user_id == current_user_id).first()
+    conto = (
+        db.query(Conto)
+        .filter(Conto.id == conto_id, Conto.user_id == current_user_id)
+        .first()
+    )
     if not conto:
         raise HTTPException(status_code=404, detail="Associated account not found")
 
@@ -136,7 +188,11 @@ def pay_debito(debito_id: int, body: DebitoPay, db: Session = Depends(get_db), c
         )
 
         # Adjust debt residuo (do not go below zero)
-        new_residuo = (db_debito.residuo - body.importo) if db_debito.residuo is not None else None
+        new_residuo = (
+            (db_debito.residuo - body.importo)
+            if db_debito.residuo is not None
+            else None
+        )
         if new_residuo is not None and new_residuo < Decimal("0"):
             new_residuo = Decimal("0.00")
 

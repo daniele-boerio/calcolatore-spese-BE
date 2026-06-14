@@ -153,11 +153,17 @@ def create_transazione(
         if getattr(transazione, "debito_id", None):
             db_debito = (
                 db.query(Debito)
-                .filter(Debito.id == transazione.debito_id, Debito.user_id == current_user_id)
+                .filter(
+                    Debito.id == transazione.debito_id,
+                    Debito.user_id == current_user_id,
+                )
                 .first()
             )
             if not db_debito:
-                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Referenced debito not found")
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="Referenced debito not found",
+                )
 
             # Sottrai l'importo dal residuo del debito; non andare sotto zero
             if db_debito.residuo is None:
