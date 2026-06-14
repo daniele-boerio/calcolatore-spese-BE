@@ -90,6 +90,10 @@ class Conto(Base):
     bank_connector_refresh_token = Column(String, nullable=True)
     bank_connector_last_sync = Column(DateTime, nullable=True)
     bank_connector_last_error = Column(String, nullable=True)
+    # Open Banking (Enable Banking) link flow: the session id of a completed link,
+    # and the pending auth `state` matched on the callback handshake.
+    bank_connector_session_id = Column(String, nullable=True)
+    bank_connector_auth_state = Column(String, nullable=True)
 
 
 class BankTransactionProposal(Base):

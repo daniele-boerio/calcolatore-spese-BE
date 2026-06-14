@@ -1,9 +1,11 @@
 import base64
 import os
+import time
 import requests
 import yfinance as yf
 from cryptography.fernet import Fernet, InvalidToken
-from datetime import date, timedelta, datetime
+from jose import jwt
+from datetime import date, timedelta, datetime, timezone
 import logging
 from database import SessionLocal
 import models
@@ -257,6 +259,160 @@ def refresh_nordigen_access_token(refresh_token: str) -> tuple[str, str]:
     return data.get("access"), data.get("refresh")
 
 
+# --- Enable Banking Open Banking flow ---
+# Auth is app-level: a short-lived JWT (RS256) signed with the application's RSA
+# private key, with the application_id carried in the JWT `kid` header. Banks are
+# identified by name + country (there is no single institution id).
+ENABLE_BANKING_BASE_URL = os.getenv(
+    "ENABLE_BANKING_BASE_URL", "https://api.enablebanking.com"
+)
+
+
+def _enable_banking_private_key() -> str:
+    path = os.getenv("ENABLE_BANKING_PRIVATE_KEY_PATH")
+    if path:
+        with open(path, "r") as f:
+            return f.read()
+    key = os.getenv("ENABLE_BANKING_PRIVATE_KEY")
+    if key:
+        # Allow the PEM to be stored on a single line with escaped newlines.
+        return key.replace("\\n", "\n")
+    raise ValueError(
+        "Enable Banking private key not configured: set ENABLE_BANKING_PRIVATE_KEY_PATH "
+        "or ENABLE_BANKING_PRIVATE_KEY"
+    )
+
+
+def get_enable_banking_jwt() -> str:
+    app_id = os.getenv("ENABLE_BANKING_APP_ID")
+    if not app_id:
+        raise ValueError("Enable Banking is not configured: set ENABLE_BANKING_APP_ID")
+    private_key = _enable_banking_private_key()
+    now = int(time.time())
+    payload = {
+        "iss": "enablebanking.com",
+        "aud": "api.enablebanking.com",
+        "iat": now,
+        "exp": now + 3600,
+    }
+    return jwt.encode(
+        payload,
+        private_key,
+        algorithm="RS256",
+        headers={"typ": "JWT", "kid": app_id},
+    )
+
+
+def _enable_banking_headers() -> dict:
+    return {
+        "Authorization": f"Bearer {get_enable_banking_jwt()}",
+        "Content-Type": "application/json",
+    }
+
+
+def list_enable_banking_aspsps(country: str = "IT") -> list[dict]:
+    url = f"{ENABLE_BANKING_BASE_URL}/aspsps"
+    response = requests.get(
+        url,
+        headers=_enable_banking_headers(),
+        params={"country": country, "psu_type": "personal"},
+        timeout=30,
+    )
+    response.raise_for_status()
+    return response.json().get("aspsps", [])
+
+
+def start_enable_banking_auth(
+    aspsp_name: str,
+    aspsp_country: str,
+    redirect_url: str,
+    state: str,
+    valid_days: int = 90,
+) -> dict:
+    url = f"{ENABLE_BANKING_BASE_URL}/auth"
+    valid_until = (
+        datetime.now(timezone.utc) + timedelta(days=valid_days)
+    ).isoformat()
+    payload = {
+        "access": {"valid_until": valid_until},
+        "aspsp": {"name": aspsp_name, "country": aspsp_country},
+        "state": state,
+        "redirect_url": redirect_url,
+        "psu_type": "personal",
+    }
+    response = requests.post(
+        url, headers=_enable_banking_headers(), json=payload, timeout=30
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def create_enable_banking_session(code: str) -> dict:
+    url = f"{ENABLE_BANKING_BASE_URL}/sessions"
+    response = requests.post(
+        url, headers=_enable_banking_headers(), json={"code": code}, timeout=30
+    )
+    response.raise_for_status()
+    return response.json()
+
+
+def fetch_enable_banking_transactions(
+    account_uid: str, since: datetime, until: datetime
+):
+    url = f"{ENABLE_BANKING_BASE_URL}/accounts/{account_uid}/transactions"
+    base_params = {
+        "date_from": since.date().isoformat(),
+        "date_to": until.date().isoformat(),
+    }
+    transactions = []
+    continuation_key = None
+
+    while True:
+        params = dict(base_params)
+        if continuation_key:
+            params["continuation_key"] = continuation_key
+        response = requests.get(
+            url, headers=_enable_banking_headers(), params=params, timeout=30
+        )
+        response.raise_for_status()
+        payload = response.json()
+
+        for tx in payload.get("transactions", []):
+            amount = Decimal(tx.get("transaction_amount", {}).get("amount", "0"))
+            if amount == 0:
+                continue
+            # Berlin Group style: CRDT = incoming, DBIT = outgoing.
+            tipo = "ENTRATA" if tx.get("credit_debit_indicator") == "CRDT" else "USCITA"
+            amount = abs(amount)
+            remittance = tx.get("remittance_information") or []
+            descrizione = (
+                " ".join(remittance) if isinstance(remittance, list) else remittance
+            )
+            booking_date = tx.get("booking_date") or tx.get("value_date")
+            if booking_date:
+                booking_date_obj = datetime.fromisoformat(booking_date).date()
+            else:
+                booking_date_obj = since.date()
+            transactions.append(
+                {
+                    "external_id": tx.get("entry_reference")
+                    or tx.get("transaction_id")
+                    or f"{booking_date_obj}-{amount}-{descrizione}",
+                    "tipo": tipo,
+                    "data": booking_date_obj,
+                    "importo": amount,
+                    "descrizione": descrizione,
+                    "provider": "ENABLEBANKING",
+                }
+            )
+
+        continuation_key = payload.get("continuation_key")
+        if not continuation_key:
+            break
+
+    return transactions
+
+
 def fetch_nordigen_transactions(
     account_id: str, access_token: str, since: datetime, until: datetime
 ):
@@ -316,7 +472,20 @@ def fetch_bank_transactions_for_conto(db, conto):
     since = conto.bank_connector_last_sync or (datetime.now() - timedelta(days=30))
     until = datetime.now()
 
-    if conto.bank_connector_provider == "NORDIGEN":
+    if conto.bank_connector_provider == "ENABLEBANKING":
+        if not conto.bank_connector_account_id:
+            raise ValueError(
+                "Enable Banking connector requires a linked account; complete the bank linking first"
+            )
+        transactions = fetch_enable_banking_transactions(
+            conto.bank_connector_account_id, since, until
+        )
+        conto.bank_connector_last_sync = datetime.now()
+        conto.bank_connector_last_error = None
+        db.add(conto)
+        db.commit()
+        return transactions
+    elif conto.bank_connector_provider == "NORDIGEN":
         if (
             not conto.bank_connector_account_id
             or not conto.bank_connector_client_id

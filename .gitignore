@@ -5,6 +5,11 @@ __pycache__/
 venv/
 .env
 
+# Open Banking / private keys — never commit these
+secrets/
+*.pem
+*.key
+
 # Database locale
 *.sqlite3
 

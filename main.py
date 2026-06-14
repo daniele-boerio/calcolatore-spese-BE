@@ -21,6 +21,7 @@ from routers import (
     statistics,
     charts,
     bank_connectors,
+    open_banking,
 )
 
 app = FastAPI(
@@ -48,6 +49,7 @@ app.include_router(ricorrenze.router)  # Ricorrenze
 app.include_router(statistics.router)  # Statistiche
 app.include_router(charts.router)  # API Grafici
 app.include_router(bank_connectors.router)  # Connettore bancario
+app.include_router(open_banking.router)  # Open Banking (GoCardless) requisition flow
 app.include_router(debiti.router)  # Debiti
 app.include_router(auth.router)  # Endpoint per forgot-password e reset-password
 

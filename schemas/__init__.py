@@ -78,3 +78,10 @@ from .bank_transaction import (
     BankTransactionProposalImport,
     BankTransactionProposalOut,
 )
+from .open_banking import (
+    InstitutionOut,
+    BankAuthStart,
+    BankAuthStartResponse,
+    BankSessionConfirm,
+    BankSessionConfirmResponse,
+)
