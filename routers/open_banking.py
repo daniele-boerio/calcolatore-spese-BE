@@ -6,7 +6,7 @@ from sqlalchemy.orm import Session
 
 import auth
 from database import get_db
-from models import Conto
+from models import Conto, User
 from schemas.open_banking import (
     InstitutionOut,
     BankAuthStart,
@@ -21,6 +21,30 @@ from services import (
 )
 
 router = APIRouter(prefix="/open-banking", tags=["OpenBanking"])
+
+
+def get_admin_user_id(
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+) -> int:
+    """Open Banking is restricted to a single admin user (you).
+
+    The admin is identified by the OPEN_BANKING_ADMIN_EMAIL env var; any other
+    authenticated user gets a 403. If the var is unset the feature is locked.
+    """
+    admin_email = os.getenv("OPEN_BANKING_ADMIN_EMAIL")
+    if not admin_email:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Open Banking admin is not configured",
+        )
+    user = db.query(User).filter(User.id == current_user_id).first()
+    if not user or user.email.lower() != admin_email.strip().lower():
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Open Banking is restricted to the admin user",
+        )
+    return current_user_id
 
 
 def get_conto(db: Session, conto_id: int, user_id: int) -> Conto:
@@ -38,7 +62,7 @@ def get_conto(db: Session, conto_id: int, user_id: int) -> Conto:
 @router.get("/institutions", response_model=list[InstitutionOut])
 def get_institutions(
     country: str = "IT",
-    current_user_id: int = Depends(auth.get_current_user_id),
+    current_user_id: int = Depends(get_admin_user_id),
 ):
     """Step 1 support: list the banks (ASPSPs) the user can pick from."""
     try:
@@ -54,7 +78,7 @@ def get_institutions(
 def start_bank_auth(
     payload: BankAuthStart,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
+    current_user_id: int = Depends(get_admin_user_id),
 ):
     """Step 2: start the Enable Banking authorization and return the bank URL.
 
@@ -100,7 +124,7 @@ def start_bank_auth(
 def confirm_bank_session(
     payload: BankSessionConfirm,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
+    current_user_id: int = Depends(get_admin_user_id),
 ):
     """Step 6: the handshake. Match the callback `state` to the pending conto,
     exchange the `code` for a session and store the linked account uid."""

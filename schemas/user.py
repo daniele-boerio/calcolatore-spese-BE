@@ -62,6 +62,8 @@ class UserResponse(BaseModel):
     email: str
     # Aggiungiamo il budget alla risposta se serve al frontend per la BudgetCard
     total_budget: Optional[Decimal] = None
+    # True solo per l'utente admin dell'Open Banking (vedi OPEN_BANKING_ADMIN_EMAIL)
+    is_open_banking_admin: bool = False
 
     @field_validator("total_budget", mode="after")
     @classmethod

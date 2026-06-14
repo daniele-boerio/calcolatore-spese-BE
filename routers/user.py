@@ -1,3 +1,4 @@
+import os
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -122,7 +123,14 @@ def get_me(
             detail="User not found. Your session may have expired",
         )
 
-    return user
+    admin_email = os.getenv("OPEN_BANKING_ADMIN_EMAIL")
+    is_open_banking_admin = bool(
+        admin_email and user.email.lower() == admin_email.strip().lower()
+    )
+
+    response = UserResponse.model_validate(user)
+    response.is_open_banking_admin = is_open_banking_admin
+    return response
 
 
 @router.put("/monthlyBudget")
