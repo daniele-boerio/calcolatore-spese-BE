@@ -573,6 +573,29 @@ def delete_transazione(
         else:
             conto.saldo -= db_trans.importo
 
+        # Se la transazione era collegata a un debito, ripristina il residuo
+        # (operazione inversa di create/pay), senza superare l'ammontare totale.
+        if db_trans.debito_id is not None:
+            db_debito = (
+                db.query(Debito)
+                .filter(
+                    Debito.id == db_trans.debito_id,
+                    Debito.user_id == current_user_id,
+                )
+                .first()
+            )
+            if db_debito is not None:
+                if db_debito.residuo is None:
+                    db_debito.residuo = db_debito.ammontare
+                nuovo_residuo = db_debito.residuo + db_trans.importo
+                if (
+                    db_debito.ammontare is not None
+                    and nuovo_residuo > db_debito.ammontare
+                ):
+                    nuovo_residuo = db_debito.ammontare
+                db_debito.residuo = nuovo_residuo
+                db.add(db_debito)
+
         db.delete(db_trans)
         db.commit()
         return {"message": "Transaction successfully deleted and balance updated"}
