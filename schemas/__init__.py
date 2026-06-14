@@ -45,6 +45,8 @@ from .transazione import (
     TransazioneOut,
     TransazionePagination,
     TransazioneFilters,
+    TransazioneSplitPart,
+    TransazioneSplitRequest,
 )
 from .investimento import (
     InvestimentoCreate,

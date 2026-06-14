@@ -6,6 +6,7 @@ from schemas import (
     TransazioneCreate,
     TransazioneOut,
     TransazionePagination,
+    TransazioneSplitRequest,
     TransazioneUpdate,
     TransazioneFilters,
 )
@@ -192,6 +193,110 @@ def create_transazione(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the transaction",
+        )
+
+
+@router.post("/{transazione_id}/split", response_model=list[TransazioneOut])
+def split_transazione(
+    transazione_id: int,
+    split_request: TransazioneSplitRequest,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    original = (
+        db.query(Transazione)
+        .filter(
+            Transazione.id == transazione_id,
+            Transazione.user_id == current_user_id,
+        )
+        .first()
+    )
+
+    if not original:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Original transaction not found",
+        )
+
+    if original.tipo == TipoTransazione.RIMBORSO or original.parent_transaction_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Refund transactions cannot be split",
+        )
+
+    if original.split_group_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Split transactions cannot be split again",
+        )
+
+    if original.debito_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transactions linked to debt cannot be split",
+        )
+
+    if (
+        db.query(Transazione)
+        .filter(Transazione.parent_transaction_id == original.id)
+        .count()
+        > 0
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Transactions with refunds cannot be split",
+        )
+
+    total_parts = sum(part.importo for part in split_request.parts)
+    if total_parts != original.importo:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Sum of split parts must equal original transaction amount",
+        )
+
+    for part in split_request.parts:
+        if part.importo <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Each split part must have a positive amount",
+            )
+        if part.debito_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Split parts cannot reference debt",
+            )
+
+    split_transactions = []
+    for part in split_request.parts:
+        new_trans = Transazione(
+            importo=part.importo,
+            importo_netto=part.importo,
+            tipo=original.tipo,
+            data=original.data,
+            descrizione=part.descrizione or original.descrizione,
+            conto_id=original.conto_id,
+            categoria_id=part.categoria_id,
+            sottocategoria_id=part.sottocategoria_id,
+            tag_id=part.tag_id,
+            user_id=current_user_id,
+            split_group_id=original.id,
+        )
+        db.add(new_trans)
+        split_transactions.append(new_trans)
+
+    db.delete(original)
+
+    try:
+        db.commit()
+        for transaction in split_transactions:
+            db.refresh(transaction)
+        return split_transactions
+    except Exception as e:
+        db.rollback()
+        print(f"Error splitting transaction: {e}")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while splitting the transaction",
         )
 
 

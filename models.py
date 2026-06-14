@@ -208,6 +208,8 @@ class Transazione(Base):
         cascade="all, delete-orphan",
     )
 
+    split_group_id = Column(Integer, nullable=True)
+
     importo_netto = Column(Numeric(10, 2), nullable=True)
 
     debito = relationship("Debito")

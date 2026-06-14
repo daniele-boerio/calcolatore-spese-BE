@@ -46,12 +46,40 @@ class TransazioneOut(TransazioneBase):
     creationDate: datetime
     lastUpdate: datetime
     importo_netto: Optional[Decimal] = None
+    split_group_id: Optional[int] = None
 
     @field_validator("importo_netto", mode="after")
     @classmethod
     def round_netto(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None:
             return v.quantize(Decimal("0.01"))
+        return v
+
+
+class TransazioneSplitPart(BaseModel):
+    importo: Decimal
+    categoria_id: Optional[int] = None
+    sottocategoria_id: Optional[int] = None
+    tag_id: Optional[int] = None
+    descrizione: Optional[str] = None
+    debito_id: Optional[int] = None
+
+    @field_validator("importo", mode="after")
+    @classmethod
+    def round_importo(cls, v: Decimal) -> Decimal:
+        return v.quantize(Decimal("0.01"))
+
+
+class TransazioneSplitRequest(BaseModel):
+    parts: List[TransazioneSplitPart]
+
+    @field_validator("parts")
+    @classmethod
+    def validate_parts(
+        cls, v: List[TransazioneSplitPart]
+    ) -> List[TransazioneSplitPart]:
+        if not v:
+            raise ValueError("At least one split part is required")
         return v
 
     model_config = ConfigDict(from_attributes=True)
