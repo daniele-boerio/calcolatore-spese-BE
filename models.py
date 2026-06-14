@@ -150,6 +150,30 @@ class Tag(Base):
     )
 
 
+class Debito(Base):
+    __tablename__ = "debiti"
+    id = Column(Integer, primary_key=True, index=True)
+    nome = Column(String, nullable=False)
+    ammontare = Column(Numeric(10, 2), nullable=False)
+    residuo = Column(Numeric(10, 2), nullable=False)
+    descrizione = Column(String, nullable=True)
+
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
+    conto_id = Column(Integer, ForeignKey("conti.id", ondelete="SET NULL"), nullable=True)
+
+    transazioni = relationship(
+        "Transazione",
+        order_by="desc(Transazione.data), desc(Transazione.creationDate), desc(Transazione.lastUpdate), Transazione.id",
+    )
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    lastUpdate = Column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+
 class Transazione(Base):
     __tablename__ = "transazioni"
     id = Column(Integer, primary_key=True, index=True)
@@ -167,6 +191,7 @@ class Transazione(Base):
         Integer, ForeignKey("sottocategorie.id", ondelete="SET NULL"), nullable=True
     )
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
+    debito_id = Column(Integer, ForeignKey("debiti.id", ondelete="SET NULL"), nullable=True)
 
     # per i rimborsi, collega la transazione al padre
     parent_transaction_id = Column(
@@ -180,6 +205,8 @@ class Transazione(Base):
     )
 
     importo_netto = Column(Numeric(10, 2), nullable=True)
+
+    debito = relationship("Debito")
 
     # Relazioni
     categoria = relationship(

@@ -62,3 +62,9 @@ from .ricorrenza import (
     RicorrenzaOut,
     RicorrenzaFilters,
 )
+from .debito import (
+    DebitoBase,
+    DebitoCreate,
+    DebitoUpdate,
+    DebitoOut,
+)

@@ -22,6 +22,7 @@ class TransazioneBase(BaseModel):
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
+    debito_id: Optional[int] = None
     parent_transaction_id: Optional[int] = None
 
     @field_validator("importo", mode="after")

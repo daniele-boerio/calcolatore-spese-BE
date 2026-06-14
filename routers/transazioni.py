@@ -16,6 +16,7 @@ from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
 from decimal import Decimal
+from models import Debito
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
@@ -147,6 +148,28 @@ def create_transazione(
             else Decimal("1")
         )
         conto.saldo += transazione.importo * modificatore
+
+        # --- GESTIONE DEBITO (se fornito) ---
+        if getattr(transazione, "debito_id", None):
+            db_debito = (
+                db.query(Debito)
+                .filter(Debito.id == transazione.debito_id, Debito.user_id == current_user_id)
+                .first()
+            )
+            if not db_debito:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Referenced debito not found")
+
+            # Sottrai l'importo dal residuo del debito; non andare sotto zero
+            if db_debito.residuo is None:
+                db_debito.residuo = db_debito.ammontare
+
+            nuovo_residuo = db_debito.residuo - transazione.importo
+            if nuovo_residuo < Decimal("0"):
+                nuovo_residuo = Decimal("0.00")
+
+            db_debito.residuo = nuovo_residuo
+            db.add(db_debito)
+        # --------------------------------------
 
         # AGGIORNAMENTO lastImport / Usage
         update_category_usage(db, new_trans.categoria_id, new_trans.sottocategoria_id)
