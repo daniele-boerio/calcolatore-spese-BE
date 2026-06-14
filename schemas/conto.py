@@ -71,7 +71,7 @@ class ContoOut(ContoBase):
 class ContoFilters:
     def __init__(
         self,
-        sort_by: Optional[List[str]] = Query(["nome:asc"]),
+        sort_by: Optional[str] = Query(None),
         nome: Optional[str] = Query(None),
         saldo_min: Optional[Decimal] = Query(None),
         saldo_max: Optional[Decimal] = Query(None),
