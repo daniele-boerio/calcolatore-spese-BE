@@ -65,6 +65,33 @@ def create_transazione(
             detail="Account not found or not authorized",
         )
 
+    # --- RICARICA (giroconto): serve un conto destinazione valido e diverso ---
+    conto_dest = None
+    if transazione.tipo == TipoTransazione.RICARICA:
+        if not transazione.conto_destinazione_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A transfer requires a destination account",
+            )
+        if transazione.conto_destinazione_id == transazione.conto_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Source and destination accounts must differ",
+            )
+        conto_dest = (
+            db.query(Conto)
+            .filter(
+                Conto.id == transazione.conto_destinazione_id,
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not conto_dest:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Destination account not found or not authorized",
+            )
+
     # Inizializziamo variabili per il padre
     parent_trans = None
 
@@ -142,13 +169,19 @@ def create_transazione(
             db.add(parent_trans)
 
         # 4. Aggiornamento Saldo (Balance Update)
-        # Il rimborso aumenta il saldo del conto (come un'entrata)
-        modificatore = (
-            Decimal("-1")
-            if transazione.tipo == TipoTransazione.USCITA
-            else Decimal("1")
-        )
-        conto.saldo += transazione.importo * modificatore
+        if transazione.tipo == TipoTransazione.RICARICA:
+            # Giroconto: i soldi escono dalla sorgente ed entrano nella destinazione
+            conto.saldo -= transazione.importo
+            conto_dest.saldo += transazione.importo
+            db.add(conto_dest)
+        else:
+            # Il rimborso aumenta il saldo del conto (come un'entrata)
+            modificatore = (
+                Decimal("-1")
+                if transazione.tipo == TipoTransazione.USCITA
+                else Decimal("1")
+            )
+            conto.saldo += transazione.importo * modificatore
 
         # --- GESTIONE DEBITO (se fornito) ---
         if getattr(transazione, "debito_id", None):
@@ -403,6 +436,9 @@ def update_transazione(
 
     # Salviamo i vecchi valori per il calcolo delle differenze
     old_importo = db_trans.importo
+    old_debito_id = db_trans.debito_id
+    old_tipo = db_trans.tipo
+    old_conto_dest_id = db_trans.conto_destinazione_id
 
     try:
         # Salviamo importo netto vecchio (o importo se None)
@@ -412,12 +448,31 @@ def update_transazione(
             else db_trans.importo
         )
 
-        # A. STORNO dal vecchio conto
-        mod_vecchio = (
-            Decimal("1") if db_trans.tipo == TipoTransazione.USCITA else Decimal("-1")
-        )
-        if conto_vecchio:
-            conto_vecchio.saldo += db_trans.importo * mod_vecchio
+        # A. STORNO del vecchio movimento
+        if old_tipo == TipoTransazione.RICARICA:
+            # Giroconto: la sorgente riprende i soldi, la destinazione li perde
+            if conto_vecchio:
+                conto_vecchio.saldo += old_importo
+            if old_conto_dest_id:
+                old_dest = (
+                    db.query(Conto)
+                    .filter(
+                        Conto.id == old_conto_dest_id,
+                        Conto.user_id == current_user_id,
+                    )
+                    .first()
+                )
+                if old_dest:
+                    old_dest.saldo -= old_importo
+                    db.add(old_dest)
+        else:
+            mod_vecchio = (
+                Decimal("1")
+                if old_tipo == TipoTransazione.USCITA
+                else Decimal("-1")
+            )
+            if conto_vecchio:
+                conto_vecchio.saldo += old_importo * mod_vecchio
 
         # B. AGGIORNAMENTO DATI
         update_data = transazione_data.model_dump(exclude_unset=True)
@@ -500,11 +555,65 @@ def update_transazione(
                 status_code=404, detail="New associated account not found"
             )
 
-        # D. APPLICAZIONE al nuovo conto
-        mod_nuovo = (
-            Decimal("-1") if db_trans.tipo == TipoTransazione.USCITA else Decimal("1")
-        )
-        conto_nuovo.saldo += db_trans.importo * mod_nuovo
+        # D. APPLICAZIONE del nuovo movimento
+        if db_trans.tipo == TipoTransazione.RICARICA:
+            if (
+                not db_trans.conto_destinazione_id
+                or db_trans.conto_destinazione_id == db_trans.conto_id
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="A transfer requires a different destination account",
+                )
+            conto_dest_nuovo = (
+                db.query(Conto)
+                .filter(
+                    Conto.id == db_trans.conto_destinazione_id,
+                    Conto.user_id == current_user_id,
+                )
+                .first()
+            )
+            if not conto_dest_nuovo:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Destination account not found or unauthorized",
+                )
+            conto_nuovo.saldo -= db_trans.importo
+            conto_dest_nuovo.saldo += db_trans.importo
+            db.add(conto_dest_nuovo)
+        else:
+            mod_nuovo = (
+                Decimal("-1")
+                if db_trans.tipo == TipoTransazione.USCITA
+                else Decimal("1")
+            )
+            conto_nuovo.saldo += db_trans.importo * mod_nuovo
+
+        # D-bis. RESIDUO DEBITO: storna il vecchio effetto e applica il nuovo,
+        # così cambi di importo (o di debito) restano coerenti col residuo.
+        def _adjust_debito_residuo(debito_id, delta):
+            if debito_id is None:
+                return
+            debito = (
+                db.query(Debito)
+                .filter(Debito.id == debito_id, Debito.user_id == current_user_id)
+                .first()
+            )
+            if debito is None:
+                return
+            if debito.residuo is None:
+                debito.residuo = debito.ammontare
+            nuovo = debito.residuo + delta
+            if nuovo < Decimal("0"):
+                nuovo = Decimal("0.00")
+            if debito.ammontare is not None and nuovo > debito.ammontare:
+                nuovo = debito.ammontare
+            debito.residuo = nuovo
+            db.add(debito)
+
+        # Reverse del vecchio (restituisce l'importo pagato), apply del nuovo (sottrae)
+        _adjust_debito_residuo(old_debito_id, old_importo)
+        _adjust_debito_residuo(db_trans.debito_id, -db_trans.importo)
 
         # E. AGGIORNAMENTO lastImport (usiamo i nuovi ID se sono cambiati)
         update_category_usage(db, db_trans.categoria_id, db_trans.sottocategoria_id)
@@ -514,6 +623,9 @@ def update_transazione(
         db.refresh(db_trans)
         return db_trans
 
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception as e:
         db.rollback()
         raise HTTPException(
@@ -568,7 +680,22 @@ def delete_transazione(
 
     try:
         # Balance reversion
-        if db_trans.tipo == TipoTransazione.USCITA:
+        if db_trans.tipo == TipoTransazione.RICARICA:
+            # Giroconto: la sorgente riprende i soldi, la destinazione li perde
+            conto.saldo += db_trans.importo
+            if db_trans.conto_destinazione_id:
+                conto_dest = (
+                    db.query(Conto)
+                    .filter(
+                        Conto.id == db_trans.conto_destinazione_id,
+                        Conto.user_id == current_user_id,
+                    )
+                    .first()
+                )
+                if conto_dest:
+                    conto_dest.saldo -= db_trans.importo
+                    db.add(conto_dest)
+        elif db_trans.tipo == TipoTransazione.USCITA:
             conto.saldo += db_trans.importo
         else:
             conto.saldo -= db_trans.importo
@@ -595,6 +722,29 @@ def delete_transazione(
                     nuovo_residuo = db_debito.ammontare
                 db_debito.residuo = nuovo_residuo
                 db.add(db_debito)
+
+        # Se questa transazione è il PADRE di rimborsi, alla cancellazione i figli
+        # vengono eliminati in cascata: prima dobbiamo stornare il loro effetto
+        # sul saldo (ognuno sul proprio conto), altrimenti il saldo resta sfasato.
+        figli_rimborsi = (
+            db.query(Transazione)
+            .filter(Transazione.parent_transaction_id == db_trans.id)
+            .all()
+        )
+        for figlio in figli_rimborsi:
+            conto_figlio = (
+                db.query(Conto)
+                .filter(
+                    Conto.id == figlio.conto_id,
+                    Conto.user_id == current_user_id,
+                )
+                .first()
+            )
+            if conto_figlio is not None:
+                if figlio.tipo == TipoTransazione.USCITA:
+                    conto_figlio.saldo += figlio.importo
+                else:
+                    conto_figlio.saldo -= figlio.importo
 
         db.delete(db_trans)
         db.commit()

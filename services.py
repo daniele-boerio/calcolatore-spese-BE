@@ -135,110 +135,132 @@ def task_transazioni_ricorrenti():
     db = SessionLocal()
     today = date.today()
 
-    # 1. Trova tutte le ricorrenze attive che devono essere eseguite oggi o prima
-    ricorrenze = (
-        db.query(models.Ricorrenza)
-        .filter(
-            models.Ricorrenza.attiva,
-            models.Ricorrenza.prossima_esecuzione <= today,
-        )
-        .all()
-    )
-
-    for ric in ricorrenze:
-        # 2. Crea la transazione reale
-        nuova_trans = models.Transazione(
-            importo=ric.importo,
-            importo_netto=ric.importo,
-            tipo=ric.tipo,
-            descrizione=f"Ricorrente: {ric.nome}",
-            data=datetime.now(),
-            conto_id=ric.conto_id,
-            user_id=ric.user_id,
-            categoria_id=ric.categoria_id,
-            sottocategoria_id=ric.sottocategoria_id,
-            tag_id=ric.tag_id,
+    try:
+        # 1. Trova tutte le ricorrenze attive che devono essere eseguite oggi o prima
+        ricorrenze = (
+            db.query(models.Ricorrenza)
+            .filter(
+                models.Ricorrenza.attiva,
+                models.Ricorrenza.prossima_esecuzione <= today,
+            )
+            .all()
         )
 
-        # 3. Aggiorna il saldo del conto associato
-        conto = db.query(models.Conto).get(ric.conto_id)
-        if ric.tipo.upper() == "ENTRATA":
-            conto.saldo += ric.importo
-        else:
-            conto.saldo -= ric.importo
+        for ric in ricorrenze:
+            # Isoliamo ogni ricorrenza: un errore su una non deve bloccare le altre.
+            try:
+                conto = db.query(models.Conto).get(ric.conto_id)
+                if conto is None:
+                    logger.warning(
+                        "Ricorrenza %s: conto %s inesistente, salto",
+                        ric.id,
+                        ric.conto_id,
+                    )
+                    continue
 
-        # 4. Calcola la prossima data di esecuzione
-        if ric.frequenza == "GIORNALIERA":
-            ric.prossima_esecuzione += timedelta(days=1)
-        elif ric.frequenza == "SETTIMANALE":
-            ric.prossima_esecuzione += timedelta(weeks=1)
-        elif ric.frequenza == "MENSILE":
-            ric.prossima_esecuzione += relativedelta(months=1)
-        elif ric.frequenza == "ANNUALE":
-            ric.prossima_esecuzione += relativedelta(years=1)
+                # 2. Crea la transazione reale
+                nuova_trans = models.Transazione(
+                    importo=ric.importo,
+                    importo_netto=ric.importo,
+                    tipo=ric.tipo,
+                    descrizione=f"Ricorrente: {ric.nome}",
+                    data=today,
+                    conto_id=ric.conto_id,
+                    user_id=ric.user_id,
+                    categoria_id=ric.categoria_id,
+                    sottocategoria_id=ric.sottocategoria_id,
+                    tag_id=ric.tag_id,
+                )
 
-        db.add(nuova_trans)
+                # 3. Aggiorna il saldo del conto associato
+                if str(ric.tipo).upper() == "ENTRATA":
+                    conto.saldo += ric.importo
+                else:
+                    conto.saldo -= ric.importo
 
-    db.commit()
-    db.close()
+                # 4. Calcola la prossima data di esecuzione
+                if ric.frequenza == "GIORNALIERA":
+                    ric.prossima_esecuzione += timedelta(days=1)
+                elif ric.frequenza == "SETTIMANALE":
+                    ric.prossima_esecuzione += timedelta(weeks=1)
+                elif ric.frequenza == "MENSILE":
+                    ric.prossima_esecuzione += relativedelta(months=1)
+                elif ric.frequenza == "ANNUALE":
+                    ric.prossima_esecuzione += relativedelta(years=1)
+
+                db.add(nuova_trans)
+                # Commit per-ricorrenza: una riga rotta non perde le altre.
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error("Errore eseguendo la ricorrenza %s: %s", ric.id, e)
+    finally:
+        db.close()
 
 
 def task_ricarica_automatica_conti():
     db = SessionLocal()
     today = date.today()
 
-    # Trova i conti con ricarica attiva che devono essere controllati oggi
-    conti_da_controllare = (
-        db.query(models.Conto)
-        .filter(
-            models.Conto.ricarica_automatica,
-            models.Conto.prossimo_controllo <= today,
-        )
-        .all()
-    )
-
-    for conto in conti_da_controllare:
-        # Se il saldo è sceso sotto la soglia minima
-        if conto.saldo < conto.soglia_minima:
-            importo_ricarica = (conto.budget_obiettivo - conto.saldo).quantize(
-                Decimal("0.01")
+    try:
+        # Trova i conti con ricarica attiva che devono essere controllati oggi
+        conti_da_controllare = (
+            db.query(models.Conto)
+            .filter(
+                models.Conto.ricarica_automatica,
+                models.Conto.prossimo_controllo <= today,
             )
-            conto_sorgente = db.query(models.Conto).get(conto.conto_sorgente_id)
+            .all()
+        )
 
-            if conto_sorgente and conto_sorgente.saldo >= importo_ricarica:
-                # 1. Crea la transazione di uscita dal conto sorgente
-                uscita = models.Transazione(
-                    importo=importo_ricarica,
-                    tipo="USCITA",
-                    descrizione=f"Ricarica automatica verso {conto.nome}",
-                    data=datetime.now(),
-                    conto_id=conto_sorgente.id,
+        for conto in conti_da_controllare:
+            try:
+                # Se il saldo è sceso sotto la soglia minima
+                if (
+                    conto.soglia_minima is not None
+                    and conto.budget_obiettivo is not None
+                    and conto.saldo < conto.soglia_minima
+                ):
+                    importo_ricarica = (
+                        conto.budget_obiettivo - conto.saldo
+                    ).quantize(Decimal("0.01"))
+                    conto_sorgente = db.query(models.Conto).get(
+                        conto.conto_sorgente_id
+                    )
+
+                    if conto_sorgente and conto_sorgente.saldo >= importo_ricarica:
+                        # Giroconto interno: una sola transazione RICARICA dalla
+                        # sorgente alla destinazione (esclusa dai totali entrate/uscite).
+                        ricarica = models.Transazione(
+                            importo=importo_ricarica,
+                            importo_netto=importo_ricarica,
+                            tipo="RICARICA",
+                            descrizione=f"Ricarica automatica da {conto_sorgente.nome}",
+                            data=today,
+                            conto_id=conto_sorgente.id,
+                            conto_destinazione_id=conto.id,
+                            user_id=conto.user_id,
+                        )
+                        db.add(ricarica)
+
+                        # Aggiorna i saldi
+                        conto_sorgente.saldo -= importo_ricarica
+                        conto.saldo += importo_ricarica
+
+                # 4. Calcola il prossimo controllo
+                if conto.frequenza_controllo == "SETTIMANALE":
+                    conto.prossimo_controllo = today + timedelta(weeks=1)
+                elif conto.frequenza_controllo == "MENSILE":
+                    conto.prossimo_controllo = today + relativedelta(months=1)
+
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error(
+                    "Errore nella ricarica automatica del conto %s: %s", conto.id, e
                 )
-                # 2. Crea la transazione di entrata nel conto target
-                entrata = models.Transazione(
-                    importo=importo_ricarica,
-                    tipo="RIMBORSO",
-                    descrizione=f"Ricarica automatica da {conto_sorgente.nome}",
-                    data=datetime.now(),
-                    conto_id=conto.id,
-                    parent_transaction_id=uscita.id,
-                )
-
-                # Aggiorna i saldi
-                conto_sorgente.saldo -= importo_ricarica
-                conto.saldo += importo_ricarica
-
-                db.add(uscita)
-                db.add(entrata)
-
-        # 4. Calcola il prossimo controllo
-        if conto.frequenza_controllo == "SETTIMANALE":
-            conto.prossimo_controllo = today + timedelta(weeks=1)
-        elif conto.frequenza_controllo == "MENSILE":
-            conto.prossimo_controllo = today + relativedelta(months=1)
-
-    db.commit()
-    db.close()
+    finally:
+        db.close()
 
 
 def get_nordigen_access_token(client_id: str, secret: str) -> tuple[str, str]:

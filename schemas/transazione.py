@@ -10,6 +10,7 @@ class TipoTransazione(str, Enum):
     ENTRATA = "ENTRATA"
     USCITA = "USCITA"
     RIMBORSO = "RIMBORSO"
+    RICARICA = "RICARICA"  # Giroconto interno tra due conti (esclusa dai totali)
 
 
 # 1. Base: Cambiamo importo in Decimal
@@ -19,6 +20,8 @@ class TransazioneBase(BaseModel):
     data: date = date.today()
     descrizione: Optional[str] = None
     conto_id: int
+    # Conto destinatario, valorizzato solo per i giroconti (tipo RICARICA)
+    conto_destinazione_id: Optional[int] = None
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None

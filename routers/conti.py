@@ -29,6 +29,22 @@ def create_conto(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
+    # Se è indicato un conto sorgente (ricarica automatica), dev'essere dell'utente
+    if conto.conto_sorgente_id is not None:
+        sorgente = (
+            db.query(Conto)
+            .filter(
+                Conto.id == conto.conto_sorgente_id,
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not sorgente:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Source account not found or unauthorized",
+            )
+
     try:
         if conto.default:
             reset_default_account(db, current_user_id)
@@ -82,9 +98,31 @@ def update_conto(
             detail="Account not found or unauthorized",
         )
 
-    try:
-        update_data = conto_data.model_dump(exclude_unset=True)
+    update_data = conto_data.model_dump(exclude_unset=True)
 
+    # Se si imposta un conto sorgente, dev'essere dell'utente (e non sé stesso).
+    # Fatto FUORI dal try: gli HTTPException qui non vanno mascherati come 500.
+    if update_data.get("conto_sorgente_id") is not None:
+        if update_data["conto_sorgente_id"] == conto_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="An account cannot be its own source",
+            )
+        sorgente = (
+            db.query(Conto)
+            .filter(
+                Conto.id == update_data["conto_sorgente_id"],
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not sorgente:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Source account not found or unauthorized",
+            )
+
+    try:
         if update_data.get("default") is True:
             reset_default_account(db, current_user_id)
 
@@ -120,6 +158,21 @@ def delete_conto(
         )
 
     try:
+        # Le ricorrenze legate a questo conto hanno una FK senza ON DELETE e
+        # bloccherebbero la cancellazione: le rimuoviamo (non hanno senso senza conto).
+        db.query(Ricorrenza).filter(
+            Ricorrenza.conto_id == conto_id,
+            Ricorrenza.user_id == current_user_id,
+        ).delete(synchronize_session=False)
+
+        # Conti che usano questo come sorgente di ricarica automatica: stacchiamo
+        # il riferimento per non bloccare la cancellazione.
+        db.query(Conto).filter(
+            Conto.conto_sorgente_id == conto_id,
+            Conto.user_id == current_user_id,
+        ).update({"conto_sorgente_id": None}, synchronize_session=False)
+
+        # Le transazioni vengono eliminate in cascata (FK ON DELETE CASCADE).
         db.delete(db_conto)
         db.commit()
         return None
@@ -127,7 +180,7 @@ def delete_conto(
         db.rollback()
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Cannot delete account. It may be linked to existing transactions",
+            detail="An error occurred while deleting the account",
         )
 
 
@@ -176,6 +229,8 @@ def get_current_month_expenses(
         Transazione.tipo != TipoTransazione.USCITA,
         Transazione.tipo != TipoTransazione.ENTRATA,
         Transazione.tipo != TipoTransazione.RIMBORSO,
+        # I giroconti (RICARICA) non sono entrate/uscite reali: esclusi
+        Transazione.tipo != TipoTransazione.RICARICA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")

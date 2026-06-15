@@ -218,12 +218,18 @@ class Transazione(Base):
     __tablename__ = "transazioni"
     id = Column(Integer, primary_key=True, index=True)
     importo = Column(Numeric(10, 2), nullable=False)
-    tipo = Column(String, nullable=False)  # "ENTRATA", "USCITA" o "RIMBORSO"
+    tipo = Column(
+        String, nullable=False
+    )  # "ENTRATA", "USCITA", "RIMBORSO" o "RICARICA"
     data = Column(Date)
     descrizione = Column(String)
 
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"))
     conto_id = Column(Integer, ForeignKey("conti.id", ondelete="CASCADE"))
+    # Conto destinatario del giroconto (solo per tipo RICARICA)
+    conto_destinazione_id = Column(
+        Integer, ForeignKey("conti.id", ondelete="SET NULL"), nullable=True
+    )
     categoria_id = Column(
         Integer, ForeignKey("categorie.id", ondelete="SET NULL"), nullable=True
     )

@@ -79,8 +79,26 @@ def update_ricorrenza(
             detail="Recurring transaction not found",
         )
 
+    update_dict = ric_data.model_dump(exclude_unset=True)
+
+    # Se si cambia il conto, verifichiamo che appartenga all'utente.
+    # Fuori dal try: l'HTTPException non va mascherato come 500.
+    if update_dict.get("conto_id") is not None:
+        conto = (
+            db.query(Conto)
+            .filter(
+                Conto.id == update_dict["conto_id"],
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not conto:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Account not found or unauthorized",
+            )
+
     try:
-        update_dict = ric_data.model_dump(exclude_unset=True)
         for key, value in update_dict.items():
             setattr(db_ric, key, value)
 

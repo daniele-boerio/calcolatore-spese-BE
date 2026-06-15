@@ -95,6 +95,7 @@ def get_chart_income_expense(
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
+            Transazione.tipo != "RICARICA",
         )
         .group_by("year", "month", Transazione.tipo)
         .all()
@@ -143,6 +144,7 @@ def get_chart_savings(
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
+            Transazione.tipo != "RICARICA",
         )
         .group_by("year", "month", Transazione.tipo)
         .all()
@@ -238,6 +240,7 @@ def get_chart_category_trend(
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
+            Transazione.tipo != "RICARICA",
         )
         .group_by("year", "month", Transazione.tipo)
         .all()
