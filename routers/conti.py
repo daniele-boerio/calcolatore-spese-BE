@@ -210,21 +210,21 @@ def get_current_month_expenses(
 
     amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
 
-    total_out = db.query(func.sum(amount_expr)).join(Conto).filter(
+    total_out = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
         Transazione.tipo == TipoTransazione.USCITA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
 
-    total_in = db.query(func.sum(amount_expr)).join(Conto).filter(
+    total_in = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
         Transazione.tipo == TipoTransazione.ENTRATA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
 
-    total_other = db.query(func.sum(amount_expr)).join(Conto).filter(
+    total_other = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
         Transazione.tipo != TipoTransazione.USCITA,
         Transazione.tipo != TipoTransazione.ENTRATA,
@@ -286,7 +286,7 @@ def get_expenses_by_category(
     # Fetch all transactions (Expenses and Refunds) specificamente per questo mese
     transazioni = (
         db.query(Transazione)
-        .join(Conto)
+        .join(Conto, Transazione.conto_id == Conto.id)
         .filter(
             Conto.user_id == current_user_id,
             Transazione.tipo == TipoTransazione.USCITA,
