@@ -66,6 +66,8 @@ def create_transazione(
         )
 
     # --- RICARICA (giroconto): serve un conto destinazione valido e diverso ---
+    # --- ACCANTONAMENTO: conto destinazione OPZIONALE (salvadanaio), ma se c'è
+    #     dev'essere valido e diverso dal sorgente. ---
     conto_dest = None
     if transazione.tipo == TipoTransazione.RICARICA:
         if not transazione.conto_destinazione_id:
@@ -73,6 +75,28 @@ def create_transazione(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="A transfer requires a destination account",
             )
+        if transazione.conto_destinazione_id == transazione.conto_id:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Source and destination accounts must differ",
+            )
+        conto_dest = (
+            db.query(Conto)
+            .filter(
+                Conto.id == transazione.conto_destinazione_id,
+                Conto.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not conto_dest:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail="Destination account not found or not authorized",
+            )
+    elif (
+        transazione.tipo == TipoTransazione.ACCANTONAMENTO
+        and transazione.conto_destinazione_id
+    ):
         if transazione.conto_destinazione_id == transazione.conto_id:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
@@ -169,11 +193,17 @@ def create_transazione(
             db.add(parent_trans)
 
         # 4. Aggiornamento Saldo (Balance Update)
-        if transazione.tipo == TipoTransazione.RICARICA:
-            # Giroconto: i soldi escono dalla sorgente ed entrano nella destinazione
+        if transazione.tipo in (
+            TipoTransazione.RICARICA,
+            TipoTransazione.ACCANTONAMENTO,
+        ):
+            # Giroconto/accantonamento: i soldi escono dalla sorgente. Per la
+            # RICARICA il conto destinazione c'è sempre; per l'ACCANTONAMENTO
+            # è opzionale (salvadanaio): se presente, lo accreditiamo.
             conto.saldo -= transazione.importo
-            conto_dest.saldo += transazione.importo
-            db.add(conto_dest)
+            if conto_dest:
+                conto_dest.saldo += transazione.importo
+                db.add(conto_dest)
         else:
             # Il rimborso aumenta il saldo del conto (come un'entrata)
             modificatore = (
@@ -449,8 +479,9 @@ def update_transazione(
         )
 
         # A. STORNO del vecchio movimento
-        if old_tipo == TipoTransazione.RICARICA:
-            # Giroconto: la sorgente riprende i soldi, la destinazione li perde
+        if old_tipo in (TipoTransazione.RICARICA, TipoTransazione.ACCANTONAMENTO):
+            # Giroconto/accantonamento: la sorgente riprende i soldi, l'eventuale
+            # destinazione li perde
             if conto_vecchio:
                 conto_vecchio.saldo += old_importo
             if old_conto_dest_id:
@@ -556,31 +587,40 @@ def update_transazione(
             )
 
         # D. APPLICAZIONE del nuovo movimento
-        if db_trans.tipo == TipoTransazione.RICARICA:
-            if (
-                not db_trans.conto_destinazione_id
-                or db_trans.conto_destinazione_id == db_trans.conto_id
-            ):
+        if db_trans.tipo in (
+            TipoTransazione.RICARICA,
+            TipoTransazione.ACCANTONAMENTO,
+        ):
+            conto_dest_nuovo = None
+            if db_trans.conto_destinazione_id:
+                if db_trans.conto_destinazione_id == db_trans.conto_id:
+                    raise HTTPException(
+                        status_code=400,
+                        detail="Source and destination accounts must differ",
+                    )
+                conto_dest_nuovo = (
+                    db.query(Conto)
+                    .filter(
+                        Conto.id == db_trans.conto_destinazione_id,
+                        Conto.user_id == current_user_id,
+                    )
+                    .first()
+                )
+                if not conto_dest_nuovo:
+                    raise HTTPException(
+                        status_code=404,
+                        detail="Destination account not found or unauthorized",
+                    )
+            elif db_trans.tipo == TipoTransazione.RICARICA:
+                # Il giroconto richiede sempre una destinazione; l'accantonamento no.
                 raise HTTPException(
                     status_code=400,
                     detail="A transfer requires a different destination account",
                 )
-            conto_dest_nuovo = (
-                db.query(Conto)
-                .filter(
-                    Conto.id == db_trans.conto_destinazione_id,
-                    Conto.user_id == current_user_id,
-                )
-                .first()
-            )
-            if not conto_dest_nuovo:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Destination account not found or unauthorized",
-                )
             conto_nuovo.saldo -= db_trans.importo
-            conto_dest_nuovo.saldo += db_trans.importo
-            db.add(conto_dest_nuovo)
+            if conto_dest_nuovo:
+                conto_dest_nuovo.saldo += db_trans.importo
+                db.add(conto_dest_nuovo)
         else:
             mod_nuovo = (
                 Decimal("-1")
@@ -680,8 +720,12 @@ def delete_transazione(
 
     try:
         # Balance reversion
-        if db_trans.tipo == TipoTransazione.RICARICA:
-            # Giroconto: la sorgente riprende i soldi, la destinazione li perde
+        if db_trans.tipo in (
+            TipoTransazione.RICARICA,
+            TipoTransazione.ACCANTONAMENTO,
+        ):
+            # Giroconto/accantonamento: la sorgente riprende i soldi, l'eventuale
+            # destinazione li perde
             conto.saldo += db_trans.importo
             if db_trans.conto_destinazione_id:
                 conto_dest = (

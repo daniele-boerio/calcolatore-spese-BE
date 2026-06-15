@@ -223,7 +223,7 @@ class Transazione(Base):
     importo = Column(Numeric(10, 2), nullable=False)
     tipo = Column(
         String, nullable=False
-    )  # "ENTRATA", "USCITA", "RIMBORSO" o "RICARICA"
+    )  # "ENTRATA", "USCITA", "RIMBORSO", "RICARICA" o "ACCANTONAMENTO"
     data = Column(Date)
     descrizione = Column(String)
 

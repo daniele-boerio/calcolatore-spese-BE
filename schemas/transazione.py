@@ -11,6 +11,10 @@ class TipoTransazione(str, Enum):
     USCITA = "USCITA"
     RIMBORSO = "RIMBORSO"
     RICARICA = "RICARICA"  # Giroconto interno tra due conti (esclusa dai totali)
+    # Accantonamento: mette da parte dei soldi. Riduce il saldo del conto sorgente
+    # (e, se indicato, accredita un conto "salvadanaio" via conto_destinazione_id).
+    # NON è una spesa, ma viene sottratto dal risparmio mensile (entrate - uscite - accantonamento).
+    ACCANTONAMENTO = "ACCANTONAMENTO"
 
 
 # 1. Base: Cambiamo importo in Decimal

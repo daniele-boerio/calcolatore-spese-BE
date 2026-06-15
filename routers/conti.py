@@ -231,11 +231,22 @@ def get_current_month_expenses(
         Transazione.tipo != TipoTransazione.RIMBORSO,
         # I giroconti (RICARICA) non sono entrate/uscite reali: esclusi
         Transazione.tipo != TipoTransazione.RICARICA,
+        # Gli accantonamenti vengono gestiti a parte (sottratti dal risparmio)
+        Transazione.tipo != TipoTransazione.ACCANTONAMENTO,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
     ).scalar() or Decimal("0")
 
-    remaining_amount = total_in + total_other - total_out
+    # Accantonamenti del mese: non sono spese, ma riducono il risparmio mensile
+    total_accantonamento = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
+        Conto.user_id == current_user_id,
+        Transazione.tipo == TipoTransazione.ACCANTONAMENTO,
+        Transazione.data >= first_day,
+        Transazione.data <= last_day,
+    ).scalar() or Decimal("0")
+
+    # Risparmio del mese: entrate - uscite - accantonamenti
+    remaining_amount = total_in + total_other - total_out - total_accantonamento
 
     if include_future_recurring:
         recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(

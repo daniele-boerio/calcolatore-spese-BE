@@ -17,6 +17,7 @@ class MonthlyIncomeExpenseOut(BaseModel):
     label: str  # Formato "YYYY-MM" o "MM"
     entrate: float
     uscite: float
+    accantonamento: float = 0.0
 
 
 class MonthlySavingsOut(BaseModel):
@@ -103,7 +104,8 @@ def get_chart_income_expense(
 
     labels = generate_month_labels(inizio, fine, multi_year)
     monthly_data = {
-        label: {"label": label, "entrate": 0.0, "uscite": 0.0} for label in labels
+        label: {"label": label, "entrate": 0.0, "uscite": 0.0, "accantonamento": 0.0}
+        for label in labels
     }
 
     for row in results:
@@ -117,6 +119,8 @@ def get_chart_income_expense(
                 monthly_data[label_key]["entrate"] = float(row.total or 0)
             elif row.tipo == "USCITA":
                 monthly_data[label_key]["uscite"] = float(row.total or 0)
+            elif row.tipo == "ACCANTONAMENTO":
+                monthly_data[label_key]["accantonamento"] = float(row.total or 0)
 
     return list(monthly_data.values())
 
@@ -152,7 +156,8 @@ def get_chart_savings(
 
     labels = generate_month_labels(inizio, fine, multi_year)
     monthly_data = {
-        label: {"label": label, "entrate": 0.0, "uscite": 0.0} for label in labels
+        label: {"label": label, "entrate": 0.0, "uscite": 0.0, "accantonamento": 0.0}
+        for label in labels
     }
 
     for row in results:
@@ -165,11 +170,14 @@ def get_chart_savings(
                 monthly_data[label_key]["entrate"] = float(row.total or 0)
             elif row.tipo == "USCITA":
                 monthly_data[label_key]["uscite"] = float(row.total or 0)
+            elif row.tipo == "ACCANTONAMENTO":
+                monthly_data[label_key]["accantonamento"] = float(row.total or 0)
 
     savings_list = []
     for label in labels:
         data = monthly_data[label]
-        risparmio = data["entrate"] - data["uscite"]
+        # Risparmio = entrate - uscite - accantonamenti
+        risparmio = data["entrate"] - data["uscite"] - data["accantonamento"]
         savings_list.append({"label": label, "risparmio": round(risparmio, 2)})
 
     return savings_list

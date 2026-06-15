@@ -48,6 +48,8 @@ def get_year_details_statistics(
             Transazione.user_id == current_user_id,
             extract("year", Transazione.data) == year,
             Transazione.tipo != "RIMBORSO",
+            # Gli accantonamenti hanno un totale separato: niente card per categoria
+            Transazione.tipo != "ACCANTONAMENTO",
         )
     )
 
@@ -77,12 +79,15 @@ def get_year_details_statistics(
 
     totale_entrata = 0.0
     totale_uscita = 0.0
+    totale_accantonamento = 0.0
 
     for row in totals_results:
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
             totale_uscita = float(row.total or 0)
+        elif row.tipo == "ACCANTONAMENTO":
+            totale_accantonamento = float(row.total or 0)
 
     # 3. Costruzione dizionario mensile pre-riempito (comprensione del dizionario)
     monthly_data = {m: {"month": m} for m in range(1, 13)}
@@ -97,6 +102,7 @@ def get_year_details_statistics(
         "data": list(monthly_data.values()),
         "totale_entrata": round(totale_entrata, 2),
         "totale_uscita": round(totale_uscita, 2),
+        "totale_accantonamento": round(totale_accantonamento, 2),
     }
 
 
@@ -125,6 +131,8 @@ def get_month_details_statistics(
             extract("year", Transazione.data) == year,
             extract("month", Transazione.data) == month,
             Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
+            # Gli accantonamenti hanno un totale separato: niente card per categoria
+            Transazione.tipo != "ACCANTONAMENTO",
         )
     )
 
@@ -204,18 +212,23 @@ def get_month_details_statistics(
 
     totale_entrata = 0.0
     totale_uscita = 0.0
+    totale_accantonamento = 0.0
 
     for row in totals_results:
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
             totale_uscita = -float(row.total or 0)
+        elif row.tipo == "ACCANTONAMENTO":
+            totale_accantonamento = float(row.total or 0)
 
-    totale = round(totale_entrata + totale_uscita, 2)
+    # Netto del mese: entrate - uscite - accantonamenti (totale_uscita è già negativo)
+    totale = round(totale_entrata + totale_uscita - totale_accantonamento, 2)
 
     return {
         "data": details_list,
         "totale_entrata": round(totale_entrata, 2),
         "totale_uscita": round(totale_uscita, 2),
+        "totale_accantonamento": round(totale_accantonamento, 2),
         "totale": totale,
     }
