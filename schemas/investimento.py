@@ -72,6 +72,15 @@ class InvestimentoUpdate(BaseModel):
     isin: Optional[str] = None
     ticker: Optional[str] = None
     nome_titolo: Optional[str] = None
+    prezzo_attuale: Optional[Decimal] = None
+    data_ultimo_aggiornamento: Optional[date] = None
+
+    @field_validator("prezzo_attuale", mode="after")
+    @classmethod
+    def round_prezzo_attuale(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None:
+            return v.quantize(PRECISIONE_TITOLI)
+        return v
 
 
 class InvestimentoOut(InvestimentoBase):

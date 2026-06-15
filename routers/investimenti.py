@@ -1,3 +1,4 @@
+from datetime import date
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -130,6 +131,15 @@ def patch_investimento(
 
     try:
         update_data = payload.model_dump(exclude_unset=True)
+
+        # Se si aggiorna il prezzo attuale senza indicare la data, registriamo
+        # automaticamente la data odierna come ultimo aggiornamento.
+        if (
+            update_data.get("prezzo_attuale") is not None
+            and "data_ultimo_aggiornamento" not in update_data
+        ):
+            update_data["data_ultimo_aggiornamento"] = date.today()
+
         for key, value in update_data.items():
             setattr(db_invest, key, value)
 
