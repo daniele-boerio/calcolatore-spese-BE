@@ -67,6 +67,9 @@ class Conto(Base):
 
     transazioni = relationship(
         "Transazione",
+        # Transazione ha due FK verso conti (conto_id e conto_destinazione_id):
+        # qui ci interessano solo le transazioni "del conto" come sorgente.
+        foreign_keys="Transazione.conto_id",
         cascade="all, delete-orphan",
         order_by="desc(Transazione.data), desc(Transazione.creationDate), desc(Transazione.lastUpdate), Transazione.id",
     )
