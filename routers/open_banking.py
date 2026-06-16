@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 import auth
 from database import get_db
 from models import Conto, User
+from schemas import ContoOut
 from schemas.open_banking import (
     InstitutionOut,
     BankAuthStart,
@@ -179,3 +180,26 @@ def confirm_bank_session(
         account_id=account_uid,
         status="LINKED",
     )
+
+
+@router.delete("/link/{conto_id}", response_model=ContoOut)
+def disconnect_bank(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(get_admin_user_id),
+):
+    """Scollega il conto dalla banca: azzera tutti i riferimenti al connettore
+    così il conto torna 'non collegato' (e si può eventualmente ricollegare)."""
+    conto = get_conto(db, conto_id, current_user_id)
+
+    conto.bank_connector_provider = None
+    conto.bank_connector_institution_id = None
+    conto.bank_connector_account_id = None
+    conto.bank_connector_session_id = None
+    conto.bank_connector_auth_state = None
+    conto.bank_connector_last_error = None
+    db.add(conto)
+    db.commit()
+    db.refresh(conto)
+
+    return conto
