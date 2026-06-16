@@ -60,6 +60,7 @@ class BankTransactionProposalStatus(str, Enum):
 
 class BankTransactionProposalOut(BaseModel):
     id: int
+    conto_id: int
     provider: str
     external_id: Optional[str] = None
     tipo: str
@@ -75,6 +76,8 @@ class BankTransactionProposalOut(BaseModel):
 
 
 class BankTransactionProposalImport(BaseModel):
+    # Conto di destinazione: opzionale, default = conto della proposta
+    conto_id: Optional[int] = None
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None

@@ -623,7 +623,14 @@ def import_bank_transaction_proposal(db, proposal, import_data, current_user_id)
     from datetime import date
     from models import Transazione, Conto, Categoria, Sottocategoria
 
-    conto = db.query(Conto).filter(Conto.id == proposal.conto_id).first()
+    # Conto di destinazione: l'utente può sceglierne uno diverso da quello della
+    # proposta (default = conto della proposta). Dev'essere comunque suo.
+    target_conto_id = getattr(import_data, "conto_id", None) or proposal.conto_id
+    conto = (
+        db.query(Conto)
+        .filter(Conto.id == target_conto_id, Conto.user_id == current_user_id)
+        .first()
+    )
     if not conto:
         raise ValueError("Associated account not found")
 
@@ -638,7 +645,7 @@ def import_bank_transaction_proposal(db, proposal, import_data, current_user_id)
         tipo=tipo,
         data=proposal.data,
         descrizione=import_data.descrizione or proposal.descrizione,
-        conto_id=proposal.conto_id,
+        conto_id=conto.id,
         user_id=current_user_id,
         categoria_id=import_data.categoria_id,
         sottocategoria_id=import_data.sottocategoria_id,
@@ -668,6 +675,15 @@ def task_sync_bank_connectors():
         )
 
         for conto in conti:
+            # Evitiamo chiamate ravvicinate (rate limit PSD2 / 429): se il conto
+            # è stato sincronizzato da meno di ~5 ore, lo saltiamo in questo giro.
+            last = conto.bank_connector_last_sync
+            if last is not None:
+                # last_sync può essere naive o aware a seconda di chi l'ha scritto
+                last_naive = last.replace(tzinfo=None)
+                if datetime.now() - last_naive < timedelta(hours=5):
+                    continue
+
             try:
                 candidates = fetch_bank_transactions_for_conto(db, conto)
                 proposals_created = 0

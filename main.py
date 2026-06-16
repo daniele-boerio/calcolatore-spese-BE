@@ -21,6 +21,7 @@ from routers import (
     statistics,
     charts,
     bank_connectors,
+    bank_proposals,
     open_banking,
 )
 
@@ -49,6 +50,7 @@ app.include_router(ricorrenze.router)  # Ricorrenze
 app.include_router(statistics.router)  # Statistiche
 app.include_router(charts.router)  # API Grafici
 app.include_router(bank_connectors.router)  # Connettore bancario
+app.include_router(bank_proposals.router)  # Proposte di transazione (tutte le pending)
 app.include_router(open_banking.router)  # Open Banking (GoCardless) requisition flow
 app.include_router(debiti.router)  # Debiti
 app.include_router(auth.router)  # Endpoint per forgot-password e reset-password
@@ -58,7 +60,9 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(task_aggiornamento_prezzi, "cron", hour=2, minute=0)
 scheduler.add_job(task_transazioni_ricorrenti, "cron", hour=3, minute=0)
 scheduler.add_job(task_ricarica_automatica_conti, "cron", hour=4, minute=0)
-scheduler.add_job(task_sync_bank_connectors, "cron", hour="*/1")
+# Ogni 6 ore (4 volte/giorno): le API AIS (PSD2) limitano gli accessi non
+# presidiati, quindi una sync oraria genera 429 "Too Many Requests".
+scheduler.add_job(task_sync_bank_connectors, "cron", hour="*/6")
 
 
 @app.on_event("startup")
