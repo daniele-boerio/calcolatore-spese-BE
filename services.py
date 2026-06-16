@@ -644,7 +644,8 @@ def import_bank_transaction_proposal(db, proposal, import_data, current_user_id)
         importo_netto=importo,
         tipo=tipo,
         data=proposal.data,
-        descrizione=import_data.descrizione or proposal.descrizione,
+        # La descrizione la decide l'utente: non ripieghiamo su quella della banca
+        descrizione=import_data.descrizione,
         conto_id=conto.id,
         user_id=current_user_id,
         categoria_id=import_data.categoria_id,
