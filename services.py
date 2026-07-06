@@ -1,5 +1,7 @@
 import base64
+import io
 import os
+import re
 import time
 import requests
 import yfinance as yf
@@ -13,7 +15,8 @@ from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Query
 from sqlalchemy import asc, desc
 from pydantic import BaseModel
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
+from typing import Optional
 
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
@@ -733,6 +736,401 @@ def discard_bank_transaction_proposal(db, proposal):
     proposal.status = "DISCARDED"
     db.add(proposal)
     return proposal
+
+
+# --- Import estratto conto PDF -> proposte di transazione -------------------
+#
+# Parser locale (nessun servizio esterno). L'euristica è volutamente GENERICA:
+# ogni banca ha un layout diverso e non tentiamo di riconoscerle tutte. Le
+# transazioni estratte diventano proposte PENDING che l'utente rivede una a una
+# prima dell'import, quindi l'obiettivo è un baseline ragionevole, facile da
+# ritarare (vedi il parametro `balance_column`).
+
+# Importi in formato italiano: 1.234,56 / 12,00 / -45,90 / 1.234,56- (segno in coda)
+_AMOUNT_RE = re.compile(r"[-+]?(?:\d{1,3}(?:\.\d{3})+|\d+),\d{2}-?")
+# Date: 01/02/2026, 01-02-26, 01.02.2026
+_DATE_RE = re.compile(r"\b(\d{1,2})[/\-.](\d{1,2})[/\-.](\d{2,4})\b")
+# Data a inizio riga: segnala l'inizio di un nuovo movimento.
+_DATE_START_RE = re.compile(r"^\s*\d{1,2}[/\-.]\d{1,2}[/\-.]\d{2,4}\b")
+# Cap di righe accumulabili in un singolo movimento multi-riga (anti-runaway).
+_MAX_RECORD_LINES = 8
+# Righe che NON sono movimenti (intestazioni, riepiloghi, piè di pagina...)
+_SKIP_HINTS = (
+    "saldo",
+    "riepilogo",
+    "totale",
+    "data valuta",
+    "descrizione operazione",
+    "estratto conto",
+    "pagina",
+    "iban",
+    "intestaz",
+)
+
+
+def _parse_italian_amount(token: str) -> Optional[Decimal]:
+    """"1.234,56" / "-45,90" / "12,00-" -> Decimal. None se non parsabile."""
+    t = token.strip()
+    negative = False
+    if t.endswith("-"):
+        negative = True
+        t = t[:-1]
+    if t.startswith("-"):
+        negative = True
+        t = t[1:]
+    elif t.startswith("+"):
+        t = t[1:]
+    t = t.replace(".", "").replace(",", ".")
+    try:
+        value = Decimal(t)
+    except InvalidOperation:
+        return None
+    return -value if negative else value
+
+
+def _parse_statement_date(day: str, month: str, year: str) -> Optional[date]:
+    try:
+        d, m, y = int(day), int(month), int(year)
+    except ValueError:
+        return None
+    if y < 100:
+        y += 2000
+    try:
+        return date(y, m, d)
+    except ValueError:
+        return None
+
+
+def _record_to_movimento(
+    text: str,
+    data_da: Optional[date],
+    data_a: Optional[date],
+    balance_column: bool,
+) -> Optional[dict]:
+    """Trasforma il testo di UN movimento (anche accorpato da più righe) in un
+    candidato proposta. None se non contiene data+importo validi."""
+    date_match = _DATE_RE.search(text)
+    if not date_match:
+        return None
+    data = _parse_statement_date(*date_match.groups())
+    if data is None:
+        return None
+
+    amount_tokens = _AMOUNT_RE.findall(text)
+    parsed_amounts = [(_parse_italian_amount(tok), tok) for tok in amount_tokens]
+    parsed_amounts = [(v, tok) for v, tok in parsed_amounts if v is not None]
+    if not parsed_amounts:
+        return None
+
+    # Se la banca stampa anche il saldo progressivo, l'importo del movimento è
+    # il penultimo numero della riga (l'ultimo è il saldo).
+    if balance_column and len(parsed_amounts) >= 2:
+        importo_val, _ = parsed_amounts[-2]
+    else:
+        importo_val, _ = parsed_amounts[-1]
+
+    importo = abs(importo_val)
+    if importo == 0:
+        return None
+
+    if (data_da and data < data_da) or (data_a and data > data_a):
+        return None
+
+    # Descrizione = testo tra la data e il primo importo.
+    first_amount_pos = text.find(amount_tokens[0], date_match.end())
+    if first_amount_pos == -1:
+        first_amount_pos = len(text)
+    descrizione = text[date_match.end() : first_amount_pos].strip(" \t-–—.€")
+    if not descrizione:
+        descrizione = text[date_match.end() :].strip(" \t-–—.€")
+    # Se in testa resta una seconda data (la "valuta"), la togliamo.
+    lead_date = _DATE_RE.match(descrizione)
+    if lead_date:
+        descrizione = descrizione[lead_date.end() :].strip(" \t-–—.€")
+    # Toglie una valuta rimasta in coda (es. "... Altre uscite €" / "EUR").
+    descrizione = re.sub(r"\s*(?:€|eur|usd)\s*$", "", descrizione, flags=re.IGNORECASE)
+    descrizione = re.sub(r"\s+", " ", descrizione).strip()
+
+    return {
+        "provider": "PDF",
+        "external_id": None,
+        "tipo": "USCITA" if importo_val < 0 else "ENTRATA",
+        "data": data,
+        "importo": importo,
+        "descrizione": descrizione or None,
+    }
+
+
+def parse_statement_text(
+    text: str,
+    data_da: Optional[date] = None,
+    data_a: Optional[date] = None,
+    balance_column: bool = False,
+) -> list[dict]:
+    """Estrae i movimenti dal testo grezzo di un estratto conto.
+
+    Un movimento INIZIA a una riga che parte con una data e si chiude quando
+    incontra un importo in formato italiano, anche parecchie righe più sotto:
+    molte banche (es. ISYBANK) mandano a capo le celle (categoria, descrizione)
+    così data e importo finiscono su righe diverse. Accorpiamo quindi le righe
+    in "record" invece di trattarle una per una. Il tipo si deduce dal segno
+    dell'importo (negativo -> USCITA, positivo -> ENTRATA).
+
+    Funzione pura (nessun I/O): testabile con testo di esempio senza PDF.
+    """
+    movimenti: list[dict] = []
+    buffer: list[str] = []
+
+    def flush_if_complete() -> bool:
+        nonlocal buffer
+        joined = " ".join(buffer)
+        if _AMOUNT_RE.search(joined):
+            mov = _record_to_movimento(joined, data_da, data_a, balance_column)
+            if mov:
+                movimenti.append(mov)
+            buffer = []
+            return True
+        return False
+
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        low = line.lower()
+        is_date_start = _DATE_START_RE.match(line) is not None
+
+        # Righe di intestazione/riepilogo (saldo, totale...) ignorate SOLO se non
+        # stiamo già componendo un movimento multi-riga.
+        if not buffer and not is_date_start and any(h in low for h in _SKIP_HINTS):
+            continue
+
+        if is_date_start:
+            # Nuovo movimento: se in buffer c'era un record non chiuso, era
+            # rumore d'intestazione (nessun importo) e viene scartato.
+            buffer = [line]
+            flush_if_complete()  # se la riga contiene già l'importo, chiude subito
+        elif buffer:
+            buffer.append(line)
+            if not flush_if_complete() and len(buffer) > _MAX_RECORD_LINES:
+                buffer = []
+        # else: fuori da un movimento -> riga ignorata
+
+    return movimenti
+
+
+def extract_pdf_text(file_bytes: bytes) -> str:
+    """Estrae tutto il testo da un PDF (import locale via pdfplumber)."""
+    import pdfplumber
+
+    parts: list[str] = []
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        for page in pdf.pages:
+            parts.append(page.extract_text() or "")
+    return "\n".join(parts)
+
+
+def parse_bank_statement_pdf(
+    file_bytes: bytes,
+    data_da: Optional[date] = None,
+    data_a: Optional[date] = None,
+    balance_column: bool = False,
+) -> list[dict]:
+    """PDF (bytes) -> lista di candidati proposta {provider, tipo, data, importo, descrizione}."""
+    text = extract_pdf_text(file_bytes)
+    return parse_statement_text(
+        text, data_da=data_da, data_a=data_a, balance_column=balance_column
+    )
+
+
+# --- Import estratto conto Excel/CSV -> proposte -----------------------------
+#
+# Molto più affidabile del PDF: l'export a foglio di calcolo ha colonne pulite.
+# Individuiamo l'intestazione dai nomi delle colonne e mappiamo data / importo /
+# descrizione, senza euristiche di layout.
+
+# Parole chiave (in minuscolo) per riconoscere le colonne nell'intestazione.
+_COL_DESCR = ("operazione", "descrizione", "causale", "dettaglio")
+_COL_ENTRATE = ("entrate", "accrediti", "avere")
+_COL_USCITE = ("uscite", "addebiti", "dare")
+
+
+def _coerce_date(value) -> Optional[date]:
+    """Cella -> date. Gestisce datetime/date nativi (Excel) e stringhe."""
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    if isinstance(value, date):
+        return value
+    match = _DATE_RE.search(str(value))
+    if match:
+        return _parse_statement_date(*match.groups())
+    return None
+
+
+def _coerce_amount(value) -> Optional[Decimal]:
+    """Cella -> Decimal. Gestisce numeri nativi (Excel) e stringhe italiane."""
+    if value is None or value == "":
+        return None
+    if isinstance(value, (int, float)):
+        try:
+            return Decimal(str(value))
+        except InvalidOperation:
+            return None
+    text = str(value)
+    match = _AMOUNT_RE.search(text)
+    if match:
+        return _parse_italian_amount(match.group(0))
+    # Fallback: formato con punto decimale (es. "-30.00") o solo cifre.
+    cleaned = text.strip().replace("€", "").replace(" ", "")
+    try:
+        return Decimal(cleaned)
+    except InvalidOperation:
+        return None
+
+
+def _cell(row: list, idx: Optional[int]):
+    if idx is None or idx >= len(row):
+        return None
+    return row[idx]
+
+
+def _detect_columns(header: list) -> Optional[dict]:
+    """Dato l'elenco delle intestazioni, ritorna gli indici di data/descrizione/
+    importo (o entrate+uscite). None se la riga non è un'intestazione valida."""
+    norm = [str(c or "").strip().lower() for c in header]
+    cols = {
+        "date": None,
+        "descr": None,
+        "amount": None,
+        "entrate": None,
+        "uscite": None,
+    }
+    for i, h in enumerate(norm):
+        if cols["date"] is None and "data" in h:
+            cols["date"] = i
+        if cols["descr"] is None and any(k in h for k in _COL_DESCR):
+            cols["descr"] = i
+        if cols["amount"] is None and "importo" in h:
+            cols["amount"] = i
+        if cols["entrate"] is None and any(k in h for k in _COL_ENTRATE):
+            cols["entrate"] = i
+        if cols["uscite"] is None and any(k in h for k in _COL_USCITE):
+            cols["uscite"] = i
+    has_amount = (
+        cols["amount"] is not None
+        or cols["entrate"] is not None
+        or cols["uscite"] is not None
+    )
+    if cols["date"] is None or not has_amount:
+        return None
+    return cols
+
+
+def parse_statement_rows(
+    rows: list,
+    provider: str = "IMPORT",
+    data_da: Optional[date] = None,
+    data_a: Optional[date] = None,
+) -> list[dict]:
+    """Righe (liste di celle grezze) -> movimenti. Trova l'intestazione dai nomi
+    delle colonne e mappa data / importo / descrizione. Formato-agnostico."""
+    header_idx = None
+    cols = None
+    for i, row in enumerate(rows):
+        detected = _detect_columns(row)
+        if detected:
+            header_idx, cols = i, detected
+            break
+    if cols is None:
+        return []
+
+    movimenti: list[dict] = []
+    for row in rows[header_idx + 1 :]:
+        if not any(c not in (None, "") for c in row):
+            continue  # riga vuota
+
+        data = _coerce_date(_cell(row, cols["date"]))
+        if data is None:
+            continue
+
+        importo_val = None
+        if cols["amount"] is not None:
+            importo_val = _coerce_amount(_cell(row, cols["amount"]))
+        if importo_val is None:
+            entrata = _coerce_amount(_cell(row, cols["entrate"]))
+            uscita = _coerce_amount(_cell(row, cols["uscite"]))
+            if entrata:
+                importo_val = abs(entrata)
+            elif uscita:
+                importo_val = -abs(uscita)
+        if importo_val is None:
+            continue
+
+        importo = abs(importo_val)
+        if importo == 0:
+            continue
+        if (data_da and data < data_da) or (data_a and data > data_a):
+            continue
+
+        descr_val = _cell(row, cols["descr"])
+        descrizione = re.sub(r"\s+", " ", str(descr_val or "")).strip()
+
+        movimenti.append(
+            {
+                "provider": provider,
+                "external_id": None,
+                "tipo": "USCITA" if importo_val < 0 else "ENTRATA",
+                "data": data,
+                "importo": importo,
+                "descrizione": descrizione or None,
+            }
+        )
+
+    return movimenti
+
+
+def _read_xlsx_rows(file_bytes: bytes) -> list:
+    import openpyxl
+
+    wb = openpyxl.load_workbook(
+        io.BytesIO(file_bytes), read_only=True, data_only=True
+    )
+    try:
+        ws = wb.active
+        return [list(r) for r in ws.iter_rows(values_only=True)]
+    finally:
+        wb.close()
+
+
+def _read_csv_rows(file_bytes: bytes) -> list:
+    import csv
+
+    text = file_bytes.decode("utf-8-sig", errors="replace")
+    sample = text[:4096]
+    # Le banche italiane usano spesso ';' (la ',' è il separatore decimale).
+    delimiter = ";" if sample.count(";") >= sample.count(",") else ","
+    reader = csv.reader(io.StringIO(text), delimiter=delimiter)
+    return [list(r) for r in reader]
+
+
+def parse_bank_statement_spreadsheet(
+    file_bytes: bytes,
+    filename: str,
+    data_da: Optional[date] = None,
+    data_a: Optional[date] = None,
+) -> list[dict]:
+    """Excel (.xlsx) o CSV (bytes) -> lista di candidati proposta."""
+    name = (filename or "").lower()
+    if name.endswith(".csv"):
+        rows = _read_csv_rows(file_bytes)
+        provider = "CSV"
+    else:
+        rows = _read_xlsx_rows(file_bytes)
+        provider = "EXCEL"
+    return parse_statement_rows(
+        rows, provider=provider, data_da=data_da, data_a=data_a
+    )
 
 
 def apply_filters_and_sort(query: Query, model, filters):

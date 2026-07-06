@@ -82,3 +82,10 @@ class BankTransactionProposalImport(BaseModel):
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
     descrizione: Optional[str] = None
+
+
+class BankStatementImportResponse(BaseModel):
+    # Esito dell'import di un estratto conto PDF.
+    parsed: int  # movimenti riconosciuti nel PDF (dopo il filtro date)
+    new_proposals: int  # proposte PENDING effettivamente create
+    skipped: int  # scartati perché duplicati di proposte già esistenti

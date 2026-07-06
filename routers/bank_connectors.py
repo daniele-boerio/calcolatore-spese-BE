@@ -1,4 +1,12 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import (
+    APIRouter,
+    Depends,
+    File,
+    Form,
+    HTTPException,
+    UploadFile,
+    status,
+)
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
@@ -7,6 +15,7 @@ from schemas.bank_transaction import (
     BankConnectorConfigOut,
     BankConnectorConfigUpdate,
     BankConnectorSyncResponse,
+    BankStatementImportResponse,
     BankTransactionProposalOut,
     BankTransactionProposalImport,
 )
@@ -17,17 +26,26 @@ from services import (
     create_bank_transaction_proposal,
     import_bank_transaction_proposal,
     discard_bank_transaction_proposal,
+    parse_bank_statement_pdf,
+    parse_bank_statement_spreadsheet,
     encrypt_token,
 )
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
+from typing import Optional
 
 router = APIRouter(prefix="/conti/{conto_id}/bank-connector", tags=["BankConnector"])
 
 
 def get_conto(db: Session, conto_id: int, user_id: int) -> Conto:
     conto = (
-        db.query(Conto).filter(Conto.id == conto_id, Conto.user_id == user_id).first()
+        db.query(Conto)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == user_id,
+            Conto.deleted_at.is_(None),
+        )
+        .first()
     )
     if not conto:
         raise HTTPException(
@@ -132,6 +150,89 @@ def sync_bank_connector(
 
     return BankConnectorSyncResponse(
         new_proposals=new_proposals, last_sync=now, until=now
+    )
+
+
+_STATEMENT_EXTS = (".pdf", ".xlsx", ".xls", ".csv")
+
+
+@router.post("/import-statement", response_model=BankStatementImportResponse)
+def import_bank_statement(
+    conto_id: int,
+    file: UploadFile = File(...),
+    data_da: Optional[date] = Form(None),
+    data_a: Optional[date] = Form(None),
+    balance_column: bool = Form(False),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Importa un estratto conto (PDF, Excel .xlsx o CSV): ne estrae i movimenti
+    (opzionalmente nel range data_da..data_a) e crea proposte PENDING, come una
+    sincronizzazione bancaria. L'utente le rivede poi dal dialog delle proposte,
+    assegnando categoria/sottocategoria/conto/tag prima di confermarle.
+
+    Excel/CSV usano un parser a colonne (affidabile); il PDF un parser euristico
+    (`balance_column` è rilevante solo per il PDF).
+    """
+    conto = get_conto(db, conto_id, current_user_id)
+
+    filename = (file.filename or "").lower()
+    if not filename.endswith(_STATEMENT_EXTS):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The file must be a PDF, Excel (.xlsx) or CSV",
+        )
+
+    file_bytes = file.file.read()
+    if not file_bytes:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The uploaded file is empty",
+        )
+
+    try:
+        if filename.endswith(".pdf"):
+            movimenti = parse_bank_statement_pdf(
+                file_bytes,
+                data_da=data_da,
+                data_a=data_a,
+                balance_column=balance_column,
+            )
+        else:
+            movimenti = parse_bank_statement_spreadsheet(
+                file_bytes,
+                filename,
+                data_da=data_da,
+                data_a=data_a,
+            )
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Could not read the statement file: {str(e)}",
+        )
+
+    parsed = len(movimenti)
+    new_proposals = 0
+    try:
+        for candidate in movimenti:
+            # create_bank_transaction_proposal deduplica su (data, importo,
+            # descrizione): reimportare lo stesso estratto non crea doppioni.
+            if create_bank_transaction_proposal(
+                db, current_user_id, conto, candidate
+            ):
+                new_proposals += 1
+        db.commit()
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Failed to save statement proposals: {str(e)}",
+        )
+
+    return BankStatementImportResponse(
+        parsed=parsed,
+        new_proposals=new_proposals,
+        skipped=parsed - new_proposals,
     )
 
 
