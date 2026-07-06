@@ -46,6 +46,7 @@ def get_year_details_statistics(
         .outerjoin(join_model, join_condition)
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             extract("year", Transazione.data) == year,
             Transazione.tipo != "RIMBORSO",
             # Gli accantonamenti hanno un totale separato: niente card per categoria
@@ -66,6 +67,7 @@ def get_year_details_statistics(
         Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         extract("year", Transazione.data) == year,
         Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
     )
@@ -128,6 +130,7 @@ def get_month_details_statistics(
         .outerjoin(Sottocategoria, Transazione.sottocategoria_id == Sottocategoria.id)
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             extract("year", Transazione.data) == year,
             extract("month", Transazione.data) == month,
             Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
@@ -198,6 +201,7 @@ def get_month_details_statistics(
         Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         extract("year", Transazione.data) == year,
         extract("month", Transazione.data) == month,
         Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio

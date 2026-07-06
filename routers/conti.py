@@ -1,4 +1,4 @@
-from datetime import date
+from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, case
 from sqlalchemy.orm import Session
@@ -36,6 +36,7 @@ def create_conto(
             .filter(
                 Conto.id == conto.conto_sorgente_id,
                 Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
             )
             .first()
         )
@@ -88,7 +89,11 @@ def update_conto(
 ):
     db_conto = (
         db.query(Conto)
-        .filter(Conto.id == conto_id, Conto.user_id == current_user_id)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -113,6 +118,7 @@ def update_conto(
             .filter(
                 Conto.id == update_data["conto_sorgente_id"],
                 Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
             )
             .first()
         )
@@ -148,7 +154,11 @@ def delete_conto(
 ):
     db_conto = (
         db.query(Conto)
-        .filter(Conto.id == conto_id, Conto.user_id == current_user_id)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -158,22 +168,25 @@ def delete_conto(
         )
 
     try:
-        # Le ricorrenze legate a questo conto hanno una FK senza ON DELETE e
-        # bloccherebbero la cancellazione: le rimuoviamo (non hanno senso senza conto).
-        db.query(Ricorrenza).filter(
-            Ricorrenza.conto_id == conto_id,
-            Ricorrenza.user_id == current_user_id,
-        ).delete(synchronize_session=False)
+        now = datetime.now(timezone.utc)
 
-        # Conti che usano questo come sorgente di ricarica automatica: stacchiamo
-        # il riferimento per non bloccare la cancellazione.
-        db.query(Conto).filter(
-            Conto.conto_sorgente_id == conto_id,
-            Conto.user_id == current_user_id,
-        ).update({"conto_sorgente_id": None}, synchronize_session=False)
+        # SOFT-DELETE: nascondiamo il conto e le sue transazioni, senza cancellarle.
+        # Restano nel DB e sono ripristinabili con POST /conti/{id}/restore.
+        # (Storicamente qui c'era un DELETE fisico che, via ON DELETE CASCADE,
+        # distruggeva IRREVERSIBILMENTE tutte le transazioni del conto: un click
+        # accidentale bruciava lo storico. Ora niente più.)
+        #
+        # Non tocchiamo ricorrenze né i riferimenti conto_sorgente: gli scheduler
+        # saltano i conti con deleted_at valorizzato, quindi tutto resta coerente e
+        # completamente reversibile al restore.
+        db.query(Transazione).filter(
+            Transazione.conto_id == conto_id,
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
+        ).update({"deleted_at": now}, synchronize_session=False)
 
-        # Le transazioni vengono eliminate in cascata (FK ON DELETE CASCADE).
-        db.delete(db_conto)
+        db_conto.deleted_at = now
+
         db.commit()
         return None
     except Exception:
@@ -181,6 +194,57 @@ def delete_conto(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the account",
+        )
+
+
+@router.post("/{conto_id}/restore", response_model=ContoOut)
+def restore_conto(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Ripristina un conto in soft-delete (e le transazioni nascoste insieme a esso).
+
+    Rete di sicurezza per le cancellazioni accidentali: non c'è una UI dedicata,
+    si invoca direttamente (es. dalla pagina /docs o via curl).
+    """
+    db_conto = (
+        db.query(Conto)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.isnot(None),
+        )
+        .first()
+    )
+
+    if not db_conto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Deleted account not found",
+        )
+
+    try:
+        # Ripristiniamo SOLO le transazioni nascoste nello stesso istante in cui il
+        # conto è stato cancellato (stesso timestamp), così non "resuscitiamo"
+        # righe nascoste da un'altra operazione.
+        deleted_marker = db_conto.deleted_at
+        db.query(Transazione).filter(
+            Transazione.conto_id == conto_id,
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at == deleted_marker,
+        ).update({"deleted_at": None}, synchronize_session=False)
+
+        db_conto.deleted_at = None
+
+        db.commit()
+        db.refresh(db_conto)
+        return db_conto
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while restoring the account",
         )
 
 
@@ -212,6 +276,7 @@ def get_current_month_expenses(
 
     total_out = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         Transazione.tipo == TipoTransazione.USCITA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
@@ -219,6 +284,7 @@ def get_current_month_expenses(
 
     total_in = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         Transazione.tipo == TipoTransazione.ENTRATA,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
@@ -226,6 +292,7 @@ def get_current_month_expenses(
 
     total_other = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         Transazione.tipo != TipoTransazione.USCITA,
         Transazione.tipo != TipoTransazione.ENTRATA,
         Transazione.tipo != TipoTransazione.RIMBORSO,
@@ -240,6 +307,7 @@ def get_current_month_expenses(
     # Accantonamenti del mese: non sono spese, ma riducono il risparmio mensile
     total_accantonamento = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
         Conto.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
         Transazione.tipo == TipoTransazione.ACCANTONAMENTO,
         Transazione.data >= first_day,
         Transazione.data <= last_day,
@@ -300,6 +368,7 @@ def get_expenses_by_category(
         .join(Conto, Transazione.conto_id == Conto.id)
         .filter(
             Conto.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.tipo == TipoTransazione.USCITA,
             Transazione.data >= first_day,
             Transazione.data <= last_day,  # Filtro per escludere transazioni future

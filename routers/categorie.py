@@ -240,6 +240,7 @@ def migrate_transactions(
         # 2. Aggiornamento Transazioni
         tx_query = db.query(Transazione).filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.categoria_id == payload.old_categoria_id,
         )
         if payload.old_sottocategoria_id:

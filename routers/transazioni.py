@@ -55,7 +55,11 @@ def create_transazione(
     # 1. Recuperiamo il conto
     conto = (
         db.query(Conto)
-        .filter(Conto.id == transazione.conto_id, Conto.user_id == current_user_id)
+        .filter(
+            Conto.id == transazione.conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -85,6 +89,7 @@ def create_transazione(
             .filter(
                 Conto.id == transazione.conto_destinazione_id,
                 Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
             )
             .first()
         )
@@ -107,6 +112,7 @@ def create_transazione(
             .filter(
                 Conto.id == transazione.conto_destinazione_id,
                 Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
             )
             .first()
         )
@@ -271,6 +277,7 @@ def split_transazione(
         .filter(
             Transazione.id == transazione_id,
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
         )
         .first()
     )
@@ -449,7 +456,9 @@ def update_transazione(
     db_trans = (
         db.query(Transazione)
         .filter(
-            Transazione.id == transazione_id, Transazione.user_id == current_user_id
+            Transazione.id == transazione_id,
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
         )
         .first()
     )
@@ -577,7 +586,11 @@ def update_transazione(
         # C. Recupero il CONTO DI DESTINAZIONE (potrebbe essere lo stesso o uno nuovo)
         conto_nuovo = (
             db.query(Conto)
-            .filter(Conto.id == db_trans.conto_id, Conto.user_id == current_user_id)
+            .filter(
+                Conto.id == db_trans.conto_id,
+                Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
+            )
             .first()
         )
 
@@ -603,6 +616,7 @@ def update_transazione(
                     .filter(
                         Conto.id == db_trans.conto_destinazione_id,
                         Conto.user_id == current_user_id,
+                        Conto.deleted_at.is_(None),
                     )
                     .first()
                 )
@@ -683,7 +697,9 @@ def delete_transazione(
     db_trans = (
         db.query(Transazione)
         .filter(
-            Transazione.id == transazione_id, Transazione.user_id == current_user_id
+            Transazione.id == transazione_id,
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
         )
         .first()
     )

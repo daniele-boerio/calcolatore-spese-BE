@@ -158,6 +158,11 @@ def task_transazioni_ricorrenti():
                     )
                     continue
 
+                # Conto in soft-delete: la ricorrenza resta sospesa finché il conto
+                # non viene ripristinato (niente transazioni fantasma su un conto nascosto).
+                if conto.deleted_at is not None:
+                    continue
+
                 # 2. Crea la transazione reale
                 nuova_trans = models.Transazione(
                     importo=ric.importo,
@@ -209,6 +214,7 @@ def task_ricarica_automatica_conti():
             .filter(
                 models.Conto.ricarica_automatica,
                 models.Conto.prossimo_controllo <= today,
+                models.Conto.deleted_at.is_(None),
             )
             .all()
         )
@@ -228,7 +234,11 @@ def task_ricarica_automatica_conti():
                         conto.conto_sorgente_id
                     )
 
-                    if conto_sorgente and conto_sorgente.saldo >= importo_ricarica:
+                    if (
+                        conto_sorgente
+                        and conto_sorgente.deleted_at is None
+                        and conto_sorgente.saldo >= importo_ricarica
+                    ):
                         # Giroconto interno: una sola transazione RICARICA dalla
                         # sorgente alla destinazione (esclusa dai totali entrate/uscite).
                         ricarica = models.Transazione(
@@ -628,7 +638,11 @@ def import_bank_transaction_proposal(db, proposal, import_data, current_user_id)
     target_conto_id = getattr(import_data, "conto_id", None) or proposal.conto_id
     conto = (
         db.query(Conto)
-        .filter(Conto.id == target_conto_id, Conto.user_id == current_user_id)
+        .filter(
+            Conto.id == target_conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
         .first()
     )
     if not conto:
@@ -671,7 +685,10 @@ def task_sync_bank_connectors():
     try:
         conti = (
             db.query(models.Conto)
-            .filter(models.Conto.bank_connector_provider != None)
+            .filter(
+                models.Conto.bank_connector_provider != None,
+                models.Conto.deleted_at.is_(None),
+            )
             .all()
         )
 
@@ -719,6 +736,13 @@ def discard_bank_transaction_proposal(db, proposal):
 
 
 def apply_filters_and_sort(query: Query, model, filters):
+    # Soft-delete: le entità con `deleted_at` (Conto, Transazione) valorizzato sono
+    # "cancellate" e non devono mai comparire nelle liste. Le escludiamo qui, in un
+    # unico punto, così ogni endpoint che passa per questo helper è coperto
+    # (conti, transazioni recenti/paginated).
+    if hasattr(model, "deleted_at"):
+        query = query.filter(model.deleted_at.is_(None))
+
     # Supporta sia BaseModel di Pydantic che classi standard con model_dump()
     filter_data = (
         filters.model_dump() if hasattr(filters, "model_dump") else filters.dict()

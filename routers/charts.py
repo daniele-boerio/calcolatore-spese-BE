@@ -93,6 +93,7 @@ def get_chart_income_expense(
         )
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
@@ -145,6 +146,7 @@ def get_chart_savings(
         )
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo != "RIMBORSO",
@@ -202,6 +204,7 @@ def get_chart_expense_composition(
         .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.data >= inizio,
             Transazione.data <= fine,
             Transazione.tipo == "USCITA",
@@ -244,6 +247,7 @@ def get_chart_category_trend(
         )
         .filter(
             Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
             Transazione.categoria_id == categoria_id,
             Transazione.data >= inizio,
             Transazione.data <= fine,

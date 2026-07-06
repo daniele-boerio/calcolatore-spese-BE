@@ -84,6 +84,13 @@ class Conto(Base):
     )
     lastImport = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
+    # Soft-delete: quando valorizzato il conto è "cancellato" (nascosto ovunque)
+    # ma resta nel DB, ripristinabile via POST /conti/{id}/restore. Le sue
+    # transazioni vengono marcate con lo stesso meccanismo. NON facciamo mai
+    # più il DELETE fisico del conto (che via ON DELETE CASCADE distruggeva
+    # irreversibilmente tutte le transazioni).
+    deleted_at = Column(DateTime, nullable=True, index=True)
+
     bank_connector_provider = Column(String, nullable=True)
     bank_connector_account_id = Column(String, nullable=True)
     bank_connector_institution_id = Column(String, nullable=True)
@@ -258,6 +265,10 @@ class Transazione(Base):
     split_group_id = Column(Integer, nullable=True)
 
     importo_netto = Column(Numeric(10, 2), nullable=True)
+
+    # Soft-delete: marcata insieme al conto quando quest'ultimo viene "cancellato".
+    # Tutte le letture/aggregati escludono le transazioni con deleted_at valorizzato.
+    deleted_at = Column(DateTime, nullable=True, index=True)
 
     debito = relationship("Debito")
 
