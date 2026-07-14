@@ -1,5 +1,5 @@
 import os
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from database import get_db
 from routers.conti import get_current_month_expenses
@@ -7,14 +7,26 @@ import auth
 from fastapi.security import OAuth2PasswordRequestForm
 from models import User
 from schemas import Token, UserCreate, UserBudgetUpdate, UserResponse
+from rate_limit import limiter
 
 router = APIRouter(tags=["User"])
+
+# Hash bcrypt di una password fittizia. Serve a far pagare a un login con utente
+# inesistente lo stesso costo di uno con utente reale: senza, il tempo di risposta
+# rivela quali account esistono.
+_DUMMY_PASSWORD_HASH = auth.get_password_hash("dummy-password-for-timing-safety")
 
 # --- ENDPOINT UTENTI ---
 
 
 @router.post("/register", response_model=Token)
-def register_user(user: UserCreate, db: Session = Depends(get_db)):
+@limiter.limit("5/hour")
+def register_user(
+    user: UserCreate,
+    request: Request,
+    response: Response,
+    db: Session = Depends(get_db),
+):
     # Controllo campi obbligatori
     if not user.username or not user.password or not user.email:
         raise HTTPException(
@@ -52,6 +64,13 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
         db.commit()
         db.refresh(new_user)
 
+        # Come il login: il nuovo utente parte già con la sessione del dispositivo
+        raw_refresh = auth.issue_refresh_token(
+            db, new_user.id, user_agent=request.headers.get("user-agent")
+        )
+        db.commit()
+        auth.set_refresh_cookie(response, raw_refresh)
+
         access_token = auth.create_access_token(
             data={
                 "user_id": new_user.id,
@@ -69,8 +88,12 @@ def register_user(user: UserCreate, db: Session = Depends(get_db)):
 
 
 @router.post("/login", response_model=Token)
+@limiter.limit("10/minute;50/hour")
 def login(
-    form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)
+    request: Request,
+    response: Response,
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: Session = Depends(get_db),
 ):
     if not form_data.username or not form_data.password:
         raise HTTPException(
@@ -90,17 +113,28 @@ def login(
         .first()
     )
 
-    if not user:
+    # Utente inesistente e password errata devono essere indistinguibili, sia nel
+    # messaggio sia nel tempo di risposta: altrimenti /login diventa un oracolo per
+    # scoprire quali email/username sono registrati. Se l'utente non c'è, verifichiamo
+    # comunque la password contro un hash fittizio per pagare lo stesso costo bcrypt.
+    if user:
+        password_ok = auth.verify_password(form_data.password, user.hashed_password)
+    else:
+        auth.verify_password(form_data.password, _DUMMY_PASSWORD_HASH)
+        password_ok = False
+
+    if not password_ok:
         raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Account not found. Please verify your credentials",
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid credentials",
         )
 
-    if not auth.verify_password(form_data.password, user.hashed_password):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Incorrect password. Try again",
-        )
+    # Sessione persistente del dispositivo: refresh token in cookie httpOnly
+    raw_refresh = auth.issue_refresh_token(
+        db, user.id, user_agent=request.headers.get("user-agent")
+    )
+    db.commit()
+    auth.set_refresh_cookie(response, raw_refresh)
 
     # Inseriamo la token_version nel JWT per validarla successivamente
     access_token = auth.create_access_token(

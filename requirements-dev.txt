@@ -1,0 +1,8 @@
+# Dipendenze di sviluppo/test (non necessarie in produzione).
+#   pip install -r requirements.txt -r requirements-dev.txt
+#   pytest -q
+#
+# `httpx` è richiesto da fastapi.testclient.TestClient, usato nei test del flusso
+# di autenticazione (tests/test_auth_flow.py) per esercitare i cookie veri.
+pytest==9.1.1
+httpx==0.28.1

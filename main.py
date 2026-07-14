@@ -5,6 +5,10 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from apscheduler.schedulers.background import BackgroundScheduler
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+
+from rate_limit import limiter
 from services import (
     task_aggiornamento_prezzi,
     task_transazioni_ricorrenti,
@@ -62,11 +66,25 @@ async def lifespan(app: FastAPI):
         scheduler.shutdown(wait=False)
 
 
+# In produzione la documentazione interattiva non va esposta: /docs e /openapi.json
+# regalano a chiunque la mappa completa degli endpoint. Il contratto resta comunque
+# generabile in locale (ENVIRONMENT != "production").
+IS_PRODUCTION = os.getenv("ENVIRONMENT", "development").lower() == "production"
+
 app = FastAPI(
     title="Calcolatore Spese API",
     servers=[{"url": "/", "description": "Default"}],
     lifespan=lifespan,
+    docs_url=None if IS_PRODUCTION else "/docs",
+    redoc_url=None if IS_PRODUCTION else "/redoc",
+    openapi_url=None if IS_PRODUCTION else "/openapi.json",
 )
+
+# Rate limiting: senza, /login è aperto al brute force e /auth/forgot-password
+# può essere usato per inondare di email una casella. I limiti per-endpoint sono
+# dichiarati con @limiter.limit(...) sui router.
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 # Middleware CORS (rimane qui)
 app.add_middleware(

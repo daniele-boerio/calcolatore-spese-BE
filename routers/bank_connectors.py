@@ -76,7 +76,10 @@ def configure_bank_connector(
     conto_id: int,
     config: BankConnectorConfigCreate,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
+    # Salvare le credenziali di una banca è riservato all'utente admin, come il
+    # resto dell'Open Banking: senza questo gate qualsiasi account registrato
+    # potrebbe collegare un conto bancario.
+    current_user_id: int = Depends(auth.get_admin_user_id),
 ):
     conto = get_conto(db, conto_id, current_user_id)
 
@@ -113,7 +116,8 @@ def configure_bank_connector(
 def sync_bank_connector(
     conto_id: int,
     db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
+    # Usa i token bancari salvati: stesso cancello del configure.
+    current_user_id: int = Depends(auth.get_admin_user_id),
 ):
     conto = get_conto(db, conto_id, current_user_id)
 

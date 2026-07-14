@@ -24,28 +24,9 @@ from services import (
 router = APIRouter(prefix="/open-banking", tags=["OpenBanking"])
 
 
-def get_admin_user_id(
-    db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
-) -> int:
-    """Open Banking is restricted to a single admin user (you).
-
-    The admin is identified by the OPEN_BANKING_ADMIN_EMAIL env var; any other
-    authenticated user gets a 403. If the var is unset the feature is locked.
-    """
-    admin_email = os.getenv("OPEN_BANKING_ADMIN_EMAIL")
-    if not admin_email:
-        raise HTTPException(
-            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-            detail="Open Banking admin is not configured",
-        )
-    user = db.query(User).filter(User.id == current_user_id).first()
-    if not user or user.email.lower() != admin_email.strip().lower():
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Open Banking is restricted to the admin user",
-        )
-    return current_user_id
+# Il gate admin vive in auth.py: lo condividono questo router e bank_connectors,
+# così esiste un solo cancello per tutto ciò che tocca le banche.
+get_admin_user_id = auth.get_admin_user_id
 
 
 def get_conto(db: Session, conto_id: int, user_id: int) -> Conto:

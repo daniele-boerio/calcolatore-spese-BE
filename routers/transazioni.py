@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
 from decimal import Decimal
-from models import Debito
+from models import Debito, Tag
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
 
@@ -49,6 +49,66 @@ def update_conto_usage(db: Session, conto_id: int):
         db.query(Conto).filter(Conto.id == conto_id).update({"lastImport": now})
 
 
+def resolve_tassonomia(
+    db: Session,
+    current_user_id: int,
+    categoria_id: int | None,
+    sottocategoria_id: int | None,
+    tag_id: int | None,
+):
+    """Carica categoria/sottocategoria/tag verificando che siano dell'utente.
+
+    Questi tre id arrivano dal client come i conti: vanno verificati con lo stesso
+    rigore, altrimenti una transazione può referenziare la tassonomia di un altro
+    utente (e l'autocompilazione della descrizione ne esporrebbe il nome).
+    Restituisce le righe già scopate così i chiamanti non le rileggono senza filtro.
+    """
+    categoria = None
+    sottocategoria = None
+    tag = None
+
+    if categoria_id is not None:
+        categoria = (
+            db.query(Categoria)
+            .filter(Categoria.id == categoria_id, Categoria.user_id == current_user_id)
+            .first()
+        )
+        if not categoria:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Category not found or not authorized",
+            )
+
+    if sottocategoria_id is not None:
+        sottocategoria = (
+            db.query(Sottocategoria)
+            .filter(
+                Sottocategoria.id == sottocategoria_id,
+                Sottocategoria.user_id == current_user_id,
+            )
+            .first()
+        )
+        if not sottocategoria:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Subcategory not found or not authorized",
+            )
+
+    if tag_id is not None:
+        tag = (
+            db.query(Tag)
+            .filter(Tag.id == tag_id, Tag.user_id == current_user_id)
+            .first()
+        )
+        if not tag:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Tag not found or not authorized",
+            )
+
+    return categoria, sottocategoria, tag
+
+
 @router.post("", response_model=TransazioneOut)
 def create_transazione(
     transazione: TransazioneCreate,
@@ -71,6 +131,15 @@ def create_transazione(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found or not authorized",
         )
+
+    # Categoria/sottocategoria/tag: verificati come il conto, prima di usarli
+    categoria_row, sottocategoria_row, _tag_row = resolve_tassonomia(
+        db,
+        current_user_id,
+        transazione.categoria_id,
+        transazione.sottocategoria_id,
+        transazione.tag_id,
+    )
 
     # --- RICARICA (giroconto): serve un conto destinazione valido e diverso ---
     # --- ACCANTONAMENTO: conto destinazione OPZIONALE (salvadanaio), ma se c'è
@@ -158,29 +227,15 @@ def create_transazione(
             trans_data["tag_id"] = parent_trans.tag_id
 
         # --- NUOVA LOGICA: AUTOCOMPILAZIONE DESCRIZIONE ---
+        # Usiamo le righe già caricate da resolve_tassonomia (scopate sull'utente):
+        # rileggerle per id senza filtro esporrebbe il nome della tassonomia altrui.
         desc_text = trans_data.get("descrizione")
         # Se non c'è descrizione o è solo composta da spazi vuoti
         if not desc_text or not str(desc_text).strip():
-            # Primo tentativo: Recupera il nome della Sottocategoria
-            if trans_data.get("sottocategoria_id"):
-                sotto = (
-                    db.query(Sottocategoria)
-                    .filter(Sottocategoria.id == trans_data["sottocategoria_id"])
-                    .first()
-                )
-                if sotto:
-                    trans_data["descrizione"] = sotto.nome
-
-            # Secondo tentativo (se ancora vuoto): Recupera il nome della Categoria
-            if not trans_data.get("descrizione"):
-                if trans_data.get("categoria_id"):
-                    cat = (
-                        db.query(Categoria)
-                        .filter(Categoria.id == trans_data["categoria_id"])
-                        .first()
-                    )
-                    if cat:
-                        trans_data["descrizione"] = cat.nome
+            if sottocategoria_row:
+                trans_data["descrizione"] = sottocategoria_row.nome
+            elif categoria_row:
+                trans_data["descrizione"] = categoria_row.nome
         # ----------------------------------------------------
 
         # Inizializziamo importo_netto per la transazione corrente
@@ -338,6 +393,14 @@ def split_transazione(
                 status_code=status.HTTP_400_BAD_REQUEST,
                 detail="Split parts cannot reference debt",
             )
+        # Ogni parte porta la propria tassonomia: va verificata come nel create
+        resolve_tassonomia(
+            db,
+            current_user_id,
+            part.categoria_id,
+            part.sottocategoria_id,
+            part.tag_id,
+        )
 
     split_transactions = []
     for part in split_request.parts:
@@ -519,28 +582,27 @@ def update_transazione(
 
         # B. AGGIORNAMENTO DATI
         update_data = transazione_data.model_dump(exclude_unset=True)
+
+        # La tassonomia in arrivo va verificata PRIMA di scriverla sulla transazione.
+        # Usiamo i valori risultanti (payload se presente, altrimenti quelli attuali)
+        # così l'autocompilazione lavora sempre su righe di proprietà dell'utente.
+        categoria_row, sottocategoria_row, _tag_row = resolve_tassonomia(
+            db,
+            current_user_id,
+            update_data.get("categoria_id", db_trans.categoria_id),
+            update_data.get("sottocategoria_id", db_trans.sottocategoria_id),
+            update_data.get("tag_id", db_trans.tag_id),
+        )
+
         for key, value in update_data.items():
             setattr(db_trans, key, value)
 
         # --- AUTOCOMPILAZIONE DESCRIZIONE ANCHE IN MODIFICA ---
         if not db_trans.descrizione or not str(db_trans.descrizione).strip():
-            if db_trans.sottocategoria_id:
-                sotto = (
-                    db.query(Sottocategoria)
-                    .filter(Sottocategoria.id == db_trans.sottocategoria_id)
-                    .first()
-                )
-                if sotto:
-                    db_trans.descrizione = sotto.nome
-
-            if not db_trans.descrizione and db_trans.categoria_id:
-                cat = (
-                    db.query(Categoria)
-                    .filter(Categoria.id == db_trans.categoria_id)
-                    .first()
-                )
-                if cat:
-                    db_trans.descrizione = cat.nome
+            if sottocategoria_row:
+                db_trans.descrizione = sottocategoria_row.nome
+            elif categoria_row:
+                db_trans.descrizione = categoria_row.nome
         # ------------------------------------------------------
 
         db.flush()

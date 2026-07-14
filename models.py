@@ -38,6 +38,38 @@ class User(Base):
     reset_token_expiration = Column(DateTime, nullable=True)
     token_version = Column(Integer, default=1, nullable=False)
 
+
+class RefreshToken(Base):
+    """Sessione persistente di un singolo dispositivo.
+
+    Il token vive in un cookie httpOnly: qui ne salviamo solo l'hash SHA-256, così
+    un dump del DB non permette di impersonare nessuno. Ogni uso ruota il token
+    dentro la stessa `family_id`; se un token già ruotato viene riproposto vuol dire
+    che è stato copiato, e revochiamo l'intera famiglia (reuse detection).
+    """
+
+    __tablename__ = "refresh_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    token_hash = Column(String(64), nullable=False, unique=True, index=True)
+    family_id = Column(String(43), nullable=False, index=True)
+
+    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    # Valorizzati quando il token viene ruotato o revocato: un token con
+    # `used_at` o `revoked_at` non è più spendibile.
+    used_at = Column(DateTime, nullable=True)
+    revoked_at = Column(DateTime, nullable=True)
+
+    user_agent = Column(String, nullable=True)
+
+    user = relationship("User")
+
+    __table_args__ = (Index("ix_refresh_tokens_user_family", "user_id", "family_id"),)
+
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
         DateTime,

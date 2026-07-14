@@ -24,40 +24,52 @@ logger = logging.getLogger(__name__)
 
 
 def get_bank_connector_cipher():
+    """Cifrario per i token bancari. Obbligatorio: niente chiave, niente Open Banking.
+
+    Il fallback precedente (chiave mancante/illeggibile → salvo in chiaro) era una
+    trappola: bastava dimenticare la variabile d'ambiente per ritrovarsi access e
+    refresh token verso conti bancari reali scritti in chiaro nel DB, con solo un
+    warning nei log. Meglio fallire subito e rumorosamente.
+    """
     key = os.getenv("BANK_CONNECTOR_ENCRYPTION_KEY")
     if not key:
-        return None
+        raise RuntimeError(
+            "BANK_CONNECTOR_ENCRYPTION_KEY non configurata: i token bancari non "
+            "possono essere cifrati. Genera una chiave con "
+            "`python -c \"from cryptography.fernet import Fernet; "
+            'print(Fernet.generate_key().decode())"` e impostala nell\'ambiente.'
+        )
     try:
         return Fernet(key.encode())
     except Exception:
         try:
             return Fernet(base64.urlsafe_b64encode(key.encode()))
-        except Exception:
-            logger.warning(
-                "Invalid BANK_CONNECTOR_ENCRYPTION_KEY; storing bank tokens without encryption"
-            )
-            return None
+        except Exception as exc:
+            raise RuntimeError(
+                "BANK_CONNECTOR_ENCRYPTION_KEY non valida: deve essere una chiave "
+                "Fernet (32 byte base64-urlsafe)."
+            ) from exc
 
 
 def encrypt_token(value: str) -> str | None:
     if value is None:
         return None
-    cipher = get_bank_connector_cipher()
-    if cipher:
-        return cipher.encrypt(value.encode()).decode()
-    return value
+    return get_bank_connector_cipher().encrypt(value.encode()).decode()
 
 
 def decrypt_token(value: str) -> str | None:
     if value is None:
         return None
-    cipher = get_bank_connector_cipher()
-    if cipher:
-        try:
-            return cipher.decrypt(value.encode()).decode()
-        except InvalidToken:
-            return value
-    return value
+    try:
+        return get_bank_connector_cipher().decrypt(value.encode()).decode()
+    except InvalidToken:
+        # Token scritto prima che la cifratura fosse obbligatoria (o con un'altra
+        # chiave): non è spendibile, va rifatto il collegamento alla banca.
+        logger.error(
+            "Token bancario non decifrabile con la chiave corrente: "
+            "ricollegare il conto alla banca."
+        )
+        raise
 
 
 def get_live_price(ticker_symbol: str, isin_code: str):
