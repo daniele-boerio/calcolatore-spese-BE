@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -12,6 +13,8 @@ from schemas import (
 from services import apply_filters_and_sort
 
 router = APIRouter(tags=["Sottocategorie"])
+
+logger = logging.getLogger(__name__)
 
 # --- ENDPOINT SOTTOCATEGORIE ---
 
@@ -79,7 +82,7 @@ def add_sottocategorie(
     except Exception as e:
         db.rollback()
         # Loggare l'errore internamente aiuta il debug
-        print(f"Errore creazione sottocategorie: {e}")
+        logger.exception("Errore creazione sottocategorie")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating subcategories",
@@ -124,7 +127,7 @@ def update_sottocategoria(
     except Exception as e:
         db.rollback()
         # Stampiamo l'errore nei log del server per sicurezza
-        print(f"Update error: {e}")
+        logger.exception("Errore update sottocategoria")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update the subcategory",
@@ -165,7 +168,7 @@ def delete_sottocategoria(
         db.rollback()
         # Loggare l'errore reale (es. IntegrityError) aiuta te nel debug,
         # mentre l'utente riceve il messaggio generico.
-        print(f"Errore eliminazione sub {sottocategoria_id}: {e}")
+        logger.exception("Errore eliminazione sottocategoria %s", sottocategoria_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Cannot delete subcategory. It's likely linked to existing transactions.",

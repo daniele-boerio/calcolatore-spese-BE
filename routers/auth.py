@@ -1,5 +1,6 @@
 import secrets
 import os
+import logging
 import smtplib
 from email.message import EmailMessage
 from datetime import datetime, timedelta
@@ -14,6 +15,8 @@ from auth import get_password_hash
 
 router = APIRouter(prefix="/auth", tags=["Auth"])
 
+logger = logging.getLogger(__name__)
+
 
 def send_reset_email(email_to: str, reset_link: str):
     smtp_server = os.getenv("SMTP_SERVER")
@@ -24,12 +27,12 @@ def send_reset_email(email_to: str, reset_link: str):
 
     # Se le configurazioni SMTP non sono presenti, fai il mock (utile in sviluppo)
     if not smtp_server or not smtp_username or not smtp_password:
-        print("\n" + "=" * 50)
-        print("!!! AVVISO: SMTP NON CONFIGURATO. MOCK EMAIL !!!")
-        print(f"EMAIL SIMULATA INVIATA A: {email_to}")
-        print("Oggetto: Reset della tua password")
-        print(f"Clicca su questo link per resettare la password: \n{reset_link}")
-        print("=" * 50 + "\n")
+        logger.warning(
+            "SMTP non configurato: email di reset SIMULATA (MOCK) per %s. "
+            "Link di reset: %s",
+            email_to,
+            reset_link,
+        )
         return
 
     try:
@@ -45,9 +48,9 @@ def send_reset_email(email_to: str, reset_link: str):
             server.starttls()
             server.login(smtp_username, smtp_password)
             server.send_message(msg)
-            print(f"Email di reset inviata con successo a {email_to}")
+            logger.info("Email di reset inviata con successo a %s", email_to)
     except Exception as e:
-        print(f"Errore durante l'invio dell'email a {email_to}: {e}")
+        logger.error("Errore durante l'invio dell'email a %s: %s", email_to, e)
 
 
 @router.post("/forgot-password")

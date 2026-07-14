@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -16,6 +17,8 @@ from services import apply_filters_and_sort
 from sqlalchemy.orm import contains_eager
 
 router = APIRouter(prefix="/categorie", tags=["Categorie"])
+
+logger = logging.getLogger(__name__)
 
 # --- ENDPOINT CATEGORIE ---
 
@@ -60,7 +63,7 @@ def create_categoria(
     except Exception as e:
         db.rollback()
         # Log dell'errore per il debug
-        print(f"Errore creazione categoria nidificata: {e}")
+        logger.exception("Errore creazione categoria nidificata")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the category and its subcategories",
@@ -155,7 +158,7 @@ def update_categoria(
 
     except Exception as e:
         db.rollback()
-        print(f"Errore update categoria {categoria_id}: {e}")
+        logger.exception("Errore update categoria %s", categoria_id)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update category and sync subcategories",
@@ -189,7 +192,7 @@ def delete_categoria(
     except Exception as e:
         db.rollback()
         # Log interno per capire se il problema è un vincolo di integrità (ForeignKey)
-        print(f"Errore eliminazione categoria {categoria_id}: {e}")
+        logger.exception("Errore eliminazione categoria %s", categoria_id)
 
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

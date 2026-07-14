@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -20,6 +21,8 @@ from decimal import Decimal
 from models import Debito
 
 router = APIRouter(prefix="/transazioni", tags=["Transazioni"])
+
+logger = logging.getLogger(__name__)
 
 # --- ENDPOINT TRANSAZIONI ---
 
@@ -258,7 +261,7 @@ def create_transazione(
     except Exception as e:
         db.rollback()
         # Log dell'errore per debugging interno
-        print(f"Error: {e}")
+        logger.exception("Errore creazione transazione")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating the transaction",
@@ -363,7 +366,7 @@ def split_transazione(
         return split_transactions
     except Exception as e:
         db.rollback()
-        print(f"Error splitting transaction: {e}")
+        logger.exception("Errore split transazione")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while splitting the transaction",

@@ -62,9 +62,11 @@ def create_xxx(
 
 ## Don't
 
-- Don't invent a test suite, `black`/`ruff`/`pytest`, or CI as if they exist — none is
-  wired up today. If the task needs tests, add the dependency and say so explicitly.
+- `pytest` **is** wired up now (`pytest.ini` + `tests/`, in-memory SQLite via
+  `tests/conftest.py`); run it after BE changes. Still absent: `black`/`ruff` and CI —
+  don't claim those exist; add the dependency explicitly if you introduce them.
 - Don't rename domains or restructure modules without calling it out — the FE depends
   on these route shapes and the swagger contract.
-- Routers currently log errors with `print(...)`; if you introduce real logging use the
-  `logging` logger already set up in `services.py`, and mention the change.
+- Routers log through the `logging` logger (`logger = logging.getLogger(__name__)`),
+  not `print(...)`; keep new error logging on that logger (use `logger.exception(...)`
+  inside `except` blocks so the traceback is captured).
