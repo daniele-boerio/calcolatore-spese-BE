@@ -7,6 +7,7 @@ from sqlalchemy import (
     ForeignKey,
     Boolean,
     Date,
+    Index,
 )
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime, timezone
@@ -388,3 +389,22 @@ class Ricorrenza(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+# --- Indici di performance -------------------------------------------------
+# Ogni query è user-scoped (`.filter(Model.user_id == ...)`): senza indice su
+# user_id il DB fa un full scan che cresce con TUTTI i dati di TUTTI gli utenti.
+# Sulla tabella più grande (transazioni) l'indice composito (user_id, data)
+# copre anche il range/ordinamento per data della lista paginata; conto_id
+# accelera i filtri per conto e i ricalcoli di saldo.
+Index("ix_conti_user_id", Conto.user_id)
+Index("ix_categorie_user_id", Categoria.user_id)
+Index("ix_sottocategorie_user_id", Sottocategoria.user_id)
+Index("ix_sottocategorie_categoria_id", Sottocategoria.categoria_id)
+Index("ix_tags_user_id", Tag.user_id)
+Index("ix_debiti_user_id", Debito.user_id)
+Index("ix_investimenti_user_id", Investimento.user_id)
+Index("ix_ricorrenze_user_id", Ricorrenza.user_id)
+Index("ix_bank_proposals_user_id", BankTransactionProposal.user_id)
+Index("ix_transazioni_user_id_data", Transazione.user_id, Transazione.data)
+Index("ix_transazioni_conto_id", Transazione.conto_id)
