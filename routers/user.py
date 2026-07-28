@@ -1,4 +1,5 @@
 import os
+import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from database import get_db
@@ -10,6 +11,8 @@ from schemas import Token, UserCreate, UserBudgetUpdate, UserResponse
 from rate_limit import limiter
 
 router = APIRouter(tags=["User"])
+
+logger = logging.getLogger(__name__)
 
 # Hash bcrypt di una password fittizia. Serve a far pagare a un login con utente
 # inesistente lo stesso costo di uno con utente reale: senza, il tempo di risposta
@@ -79,8 +82,19 @@ def register_user(
         )
 
         return {"access_token": access_token, "username": new_user.username}
+    except HTTPException:
+        # Un errore già "parlante" (400/409/...) non va mascherato da 500 generico.
+        db.rollback()
+        raise
     except Exception:
         db.rollback()
+        # Senza questo log l'unica traccia di cosa sia andato storto è il messaggio
+        # generico restituito al client: la causa reale sparisce.
+        logger.exception(
+            "Registrazione fallita per email=%s username=%s",
+            email_lower,
+            username_lower,
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while creating your account. Please try again later",
@@ -129,11 +143,25 @@ def login(
             detail="Invalid credentials",
         )
 
-    # Sessione persistente del dispositivo: refresh token in cookie httpOnly
-    raw_refresh = auth.issue_refresh_token(
-        db, user.id, user_agent=request.headers.get("user-agent")
-    )
-    db.commit()
+    # Sessione persistente del dispositivo: refresh token in cookie httpOnly.
+    # Qui le credenziali sono già state validate: se fallisce, il problema è la
+    # creazione della sessione, e il messaggio deve dirlo invece di far sembrare
+    # il login stesso rotto (vedi `/auth/refresh`, stessa gestione).
+    try:
+        raw_refresh = auth.issue_refresh_token(
+            db, user.id, user_agent=request.headers.get("user-agent")
+        )
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "Login: creazione della sessione fallita per user_id=%s", user.id
+        )
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Credentials are valid but the device session could not be created. Please try again",
+        )
+
     auth.set_refresh_cookie(response, raw_refresh)
 
     # Inseriamo la token_version nel JWT per validarla successivamente
@@ -187,8 +215,14 @@ def update_monthly_budget(
 
         # Restituiamo i dati aggiornati
         return get_current_month_expenses(db, current_user_id)
+    except HTTPException:
+        db.rollback()
+        raise
     except Exception:
         db.rollback()
+        logger.exception(
+            "Aggiornamento del budget mensile fallito per user_id=%s", current_user_id
+        )
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update monthly budget",

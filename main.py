@@ -1,9 +1,11 @@
 import os
 import logging
+import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from apscheduler.schedulers.background import BackgroundScheduler
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
@@ -85,6 +87,46 @@ app = FastAPI(
 # dichiarati con @limiter.limit(...) sui router.
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+# Un'eccezione non gestita, senza questo blocco, viene raccolta dal
+# ServerErrorMiddleware di Starlette: risposta "Internal Server Error" in text/plain
+# e — soprattutto — SENZA header CORS, perché quel middleware sta più in alto di
+# CORSMiddleware. Il browser scarta la risposta, il frontend non legge nulla e può
+# solo dire "errore di connessione", perdendo la causa vera.
+#
+# Qui l'errore diventa un JSON con un `detail` leggibile e un `error_id` che compare
+# identico nei log: quando un utente segnala un errore, quel codice porta dritto alla
+# traceback corrispondente.
+#
+# ORDINE IMPORTANTE: questo middleware va registrato PRIMA di CORSMiddleware. Starlette
+# mette per ultimo il primo registrato, quindi così CORS resta più esterno e aggiunge i
+# suoi header anche alla risposta d'errore.
+@app.middleware("http")
+async def handle_unexpected_errors(request: Request, call_next):
+    try:
+        return await call_next(request)
+    except Exception:
+        error_id = uuid.uuid4().hex[:8]
+        logger.exception(
+            "Errore non gestito [%s] su %s %s",
+            error_id,
+            request.method,
+            request.url.path,
+        )
+        return JSONResponse(
+            status_code=500,
+            content={
+                # Messaggio in inglese come il resto dei `detail` dei router: la
+                # traduzione per l'utente la fa il frontend (i18n).
+                "detail": (
+                    f"Unexpected server error on {request.method} "
+                    f"{request.url.path} (reference {error_id})"
+                ),
+                "error_id": error_id,
+            },
+        )
+
 
 # Middleware CORS (rimane qui)
 app.add_middleware(

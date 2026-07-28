@@ -68,14 +68,10 @@ class RefreshToken(Base):
 
     user = relationship("User")
 
+    # Niente `creationDate`/`lastUpdate` qui (a differenza delle entità di dominio):
+    # il ciclo di vita del token è già coperto da created_at/used_at/revoked_at, e la
+    # migration a7c1f2d3e4b5 non crea quelle colonne.
     __table_args__ = (Index("ix_refresh_tokens_user_family", "user_id", "family_id"),)
-
-    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    lastUpdate = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
 
 
 class Conto(Base):
