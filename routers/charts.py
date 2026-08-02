@@ -7,6 +7,7 @@ from pydantic import BaseModel
 from database import get_db
 from auth import get_current_user_id
 from models import Transazione, Categoria
+from services import importo_effettivo
 
 router = APIRouter(prefix="/charts", tags=["Charts"])
 
@@ -89,7 +90,7 @@ def get_chart_income_expense(
             extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             Transazione.tipo,
-            func.sum(Transazione.importo_netto).label("total"),
+            func.sum(importo_effettivo()).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,
@@ -142,7 +143,7 @@ def get_chart_savings(
             extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             Transazione.tipo,
-            func.sum(Transazione.importo_netto).label("total"),
+            func.sum(importo_effettivo()).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,
@@ -199,7 +200,7 @@ def get_chart_expense_composition(
     query = (
         db.query(
             Categoria.nome.label("categoria"),
-            func.sum(Transazione.importo_netto).label("total"),
+            func.sum(importo_effettivo()).label("total"),
         )
         .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
         .filter(
@@ -243,7 +244,7 @@ def get_chart_category_trend(
             extract("year", Transazione.data).label("year"),
             extract("month", Transazione.data).label("month"),
             Transazione.tipo,
-            func.sum(Transazione.importo_netto).label("total"),
+            func.sum(importo_effettivo()).label("total"),
         )
         .filter(
             Transazione.user_id == current_user_id,

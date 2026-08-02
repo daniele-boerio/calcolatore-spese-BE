@@ -5,13 +5,14 @@ from typing import Optional
 from database import get_db
 from auth import get_current_user_id
 from models import Transazione, Categoria, Sottocategoria
+from services import importo_effettivo
 
 router = APIRouter(prefix="/statistics", tags=["Statistics"])
 
 
 # Helper per calcolare l'importo standard per le statistiche
 def get_calculated_amount():
-    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
+    amount_expr = importo_effettivo()
     return case(
         (Transazione.tipo == "USCITA", -amount_expr),
         (Transazione.tipo == "ENTRATA", amount_expr),
@@ -51,6 +52,9 @@ def get_year_details_statistics(
             Transazione.tipo != "RIMBORSO",
             # Gli accantonamenti hanno un totale separato: niente card per categoria
             Transazione.tipo != "ACCANTONAMENTO",
+            # I giroconti non sono entrate/uscite: senza questo filtro generavano
+            # card fantasma a 0.00 (get_calculated_amount li azzera ma la riga resta)
+            Transazione.tipo != "RICARICA",
         )
     )
 
@@ -62,9 +66,9 @@ def get_year_details_statistics(
 
     results = query.group_by("month", "label").all()
 
-    # Calcolo totali annuali per tipo (usando importo_netto)
+    # Calcolo totali annuali per tipo (stesso importo delle card: vedi importo_effettivo)
     totals_query = db.query(
-        Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
+        Transazione.tipo, func.sum(importo_effettivo()).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
         Transazione.deleted_at.is_(None),
@@ -87,7 +91,9 @@ def get_year_details_statistics(
         if row.tipo == "ENTRATA":
             totale_entrata = float(row.total or 0)
         elif row.tipo == "USCITA":
-            totale_uscita = float(row.total or 0)
+            # Negativo come in /monthDetails: i due endpoint devono parlare
+            # la stessa lingua sul segno delle uscite.
+            totale_uscita = -float(row.total or 0)
         elif row.tipo == "ACCANTONAMENTO":
             totale_accantonamento = float(row.total or 0)
 
@@ -136,6 +142,9 @@ def get_month_details_statistics(
             Transazione.tipo != "RIMBORSO",  # Escludiamo i rimborsi dal conteggio
             # Gli accantonamenti hanno un totale separato: niente card per categoria
             Transazione.tipo != "ACCANTONAMENTO",
+            # I giroconti non sono entrate/uscite: senza questo filtro generavano
+            # card fantasma a 0.00 (get_calculated_amount li azzera ma la riga resta)
+            Transazione.tipo != "RICARICA",
         )
     )
 
@@ -196,9 +205,9 @@ def get_month_details_statistics(
         cat["sottocategorie"].sort(key=lambda x: x["sottocategoria"])
         details_list.append(cat)
 
-    # Calcolo totali mensili per tipo (usando importo_netto)
+    # Calcolo totali mensili per tipo (stesso importo delle card: vedi importo_effettivo)
     totals_query = db.query(
-        Transazione.tipo, func.sum(Transazione.importo_netto).label("total")
+        Transazione.tipo, func.sum(importo_effettivo()).label("total")
     ).filter(
         Transazione.user_id == current_user_id,
         Transazione.deleted_at.is_(None),

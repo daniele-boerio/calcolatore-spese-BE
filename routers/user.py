@@ -3,7 +3,7 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from database import get_db
-from routers.conti import get_current_month_expenses
+from routers.conti import compute_current_month_budget
 import auth
 from fastapi.security import OAuth2PasswordRequestForm
 from models import User
@@ -214,7 +214,7 @@ def update_monthly_budget(
         db.commit()
 
         # Restituiamo i dati aggiornati
-        return get_current_month_expenses(db, current_user_id)
+        return compute_current_month_budget(db, current_user_id)
     except HTTPException:
         db.rollback()
         raise

@@ -1,13 +1,13 @@
 from datetime import date, datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, case
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Conto, Transazione, User, Ricorrenza
+from models import Categoria, Conto, Transazione, User, Ricorrenza
 from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
 from schemas.transazione import TipoTransazione
-from services import apply_filters_and_sort
+from services import apply_filters_and_sort, importo_effettivo
 import calendar
 from decimal import Decimal
 
@@ -248,15 +248,18 @@ def restore_conto(
         )
 
 
-@router.get("/currentMonthExpenses")
-def get_current_month_expenses(
-    include_future_recurring: bool = Query(
-        False,
-        description="Include future active recurring expenses within the current month",
-    ),
-    db: Session = Depends(get_db),
-    current_user_id: int = Depends(auth.get_current_user_id),
+def compute_current_month_budget(
+    db: Session,
+    current_user_id: int,
+    include_future_recurring: bool = False,
 ):
+    """Risparmio del mese corrente: entrate - uscite - accantonamenti.
+
+    Funzione normale, senza `Depends`: la usano sia GET /conti/currentMonthExpenses
+    sia PUT /monthlyBudget, che deve restituire la card ricalcolata. Chiamare
+    direttamente l'endpoint da un altro router non funziona — i default sono
+    oggetti `Query`/`Depends`, non valori.
+    """
     user = db.query(User).filter(User.id == current_user_id).first()
 
     if not user:
@@ -272,49 +275,40 @@ def get_current_month_expenses(
     _, last_day_num = calendar.monthrange(today.year, today.month)
     last_day = today.replace(day=last_day_num)
 
-    amount_expr = func.coalesce(Transazione.importo_netto, Transazione.importo)
+    # Un solo giro in SQL raggruppato per tipo, invece di una query per tipo.
+    # Lo scoping è su Transazione.user_id come in statistics/charts: la vecchia
+    # join su Conto faceva sparire dal solo budget le transazioni senza conto.
+    totals_by_tipo = dict(
+        db.query(Transazione.tipo, func.sum(importo_effettivo()))
+        .filter(
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
+            Transazione.data >= first_day,
+            Transazione.data <= last_day,
+            Transazione.tipo.in_(
+                (
+                    TipoTransazione.ENTRATA.value,
+                    TipoTransazione.USCITA.value,
+                    TipoTransazione.ACCANTONAMENTO.value,
+                )
+            ),
+        )
+        .group_by(Transazione.tipo)
+        .all()
+    )
 
-    total_out = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
-        Conto.user_id == current_user_id,
-        Transazione.deleted_at.is_(None),
-        Transazione.tipo == TipoTransazione.USCITA,
-        Transazione.data >= first_day,
-        Transazione.data <= last_day,
-    ).scalar() or Decimal("0")
+    def _totale(tipo: TipoTransazione) -> Decimal:
+        return totals_by_tipo.get(tipo.value) or Decimal("0")
 
-    total_in = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
-        Conto.user_id == current_user_id,
-        Transazione.deleted_at.is_(None),
-        Transazione.tipo == TipoTransazione.ENTRATA,
-        Transazione.data >= first_day,
-        Transazione.data <= last_day,
-    ).scalar() or Decimal("0")
-
-    total_other = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
-        Conto.user_id == current_user_id,
-        Transazione.deleted_at.is_(None),
-        Transazione.tipo != TipoTransazione.USCITA,
-        Transazione.tipo != TipoTransazione.ENTRATA,
-        Transazione.tipo != TipoTransazione.RIMBORSO,
-        # I giroconti (RICARICA) non sono entrate/uscite reali: esclusi
-        Transazione.tipo != TipoTransazione.RICARICA,
-        # Gli accantonamenti vengono gestiti a parte (sottratti dal risparmio)
-        Transazione.tipo != TipoTransazione.ACCANTONAMENTO,
-        Transazione.data >= first_day,
-        Transazione.data <= last_day,
-    ).scalar() or Decimal("0")
-
+    total_in = _totale(TipoTransazione.ENTRATA)
+    total_out = _totale(TipoTransazione.USCITA)
     # Accantonamenti del mese: non sono spese, ma riducono il risparmio mensile
-    total_accantonamento = db.query(func.sum(amount_expr)).join(Conto, Transazione.conto_id == Conto.id).filter(
-        Conto.user_id == current_user_id,
-        Transazione.deleted_at.is_(None),
-        Transazione.tipo == TipoTransazione.ACCANTONAMENTO,
-        Transazione.data >= first_day,
-        Transazione.data <= last_day,
-    ).scalar() or Decimal("0")
+    total_accantonamento = _totale(TipoTransazione.ACCANTONAMENTO)
+    # RIMBORSO e RICARICA restano fuori: il primo è già scontato da importo_netto
+    # sulla transazione padre, il secondo è un giroconto interno.
 
     # Risparmio del mese: entrate - uscite - accantonamenti
-    remaining_amount = total_in + total_other - total_out - total_accantonamento
+    remaining_amount = total_in - total_out - total_accantonamento
 
     if include_future_recurring:
         recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(
@@ -350,6 +344,18 @@ def get_current_month_expenses(
     }
 
 
+@router.get("/currentMonthExpenses")
+def get_current_month_expenses(
+    include_future_recurring: bool = Query(
+        False,
+        description="Include future active recurring expenses within the current month",
+    ),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    return compute_current_month_budget(db, current_user_id, include_future_recurring)
+
+
 @router.get("/expensesByCategory")
 def get_expenses_by_category(
     db: Session = Depends(get_db),
@@ -362,32 +368,32 @@ def get_expenses_by_category(
     _, last_day_num = calendar.monthrange(today.year, today.month)
     last_day = today.replace(day=last_day_num)
 
-    # Fetch all transactions (Expenses and Refunds) specificamente per questo mese
-    transazioni = (
-        db.query(Transazione)
-        .join(Conto, Transazione.conto_id == Conto.id)
+    # Aggregazione in SQL con lo stesso importo usato dal budget: sommare qui
+    # `importo_netto` nudo (NULL -> 0) faceva divergere la torta dalla card.
+    results = (
+        db.query(
+            Categoria.nome.label("categoria"),
+            func.sum(importo_effettivo()).label("totale"),
+        )
+        .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
         .filter(
-            Conto.user_id == current_user_id,
+            Transazione.user_id == current_user_id,
             Transazione.deleted_at.is_(None),
             Transazione.tipo == TipoTransazione.USCITA,
             Transazione.data >= first_day,
             Transazione.data <= last_day,  # Filtro per escludere transazioni future
         )
+        .group_by(Categoria.nome)
         .all()
     )
 
-    stats = {}
-
-    for t in transazioni:
-        cat_nome = t.categoria.nome if t.categoria else "Uncategorized"
-        # Inizializza con Decimal("0")
-        stats[cat_nome] = stats.get(cat_nome, Decimal("0")) + (
-            t.importo_netto or Decimal("0")
-        )
-
-    # Nella return, lasciamo che Pydantic o il casting gestiscano la pulizia
+    # Le categorie interamente rimborsate (netto <= 0) restano fuori: una fetta
+    # negativa non è rappresentabile in un grafico a torta.
     return [
-        {"label": cat, "value": val.quantize(Decimal("0.01"))}
-        for cat, val in stats.items()
-        if val > 0
+        {
+            "label": row.categoria or "Uncategorized",
+            "value": (row.totale or Decimal("0")).quantize(Decimal("0.01")),
+        }
+        for row in results
+        if (row.totale or Decimal("0")) > 0
     ]

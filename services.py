@@ -13,7 +13,7 @@ from database import SessionLocal
 import models
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Query
-from sqlalchemy import asc, desc
+from sqlalchemy import asc, desc, func
 from pydantic import BaseModel
 from decimal import Decimal, InvalidOperation
 from typing import Optional
@@ -21,6 +21,20 @@ from typing import Optional
 # Configura il logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def importo_effettivo():
+    """Importo di una transazione al netto degli eventuali rimborsi.
+
+    UNICA fonte di verità per tutti gli aggregati (budget, statistiche, grafici):
+    `importo_netto` quando è valorizzato, altrimenti `importo`.
+
+    Il coalesce non è un dettaglio difensivo: la migration che ha introdotto
+    `importo_netto` (9cd85e955956) non ha fatto il backfill, quindi le transazioni
+    più vecchie ce l'hanno a NULL. Sommando la colonna nuda, SQL le scarta e lo
+    stesso mese risulta con totali diversi a seconda dell'endpoint interrogato.
+    """
+    return func.coalesce(models.Transazione.importo_netto, models.Transazione.importo)
 
 
 def get_bank_connector_cipher():
