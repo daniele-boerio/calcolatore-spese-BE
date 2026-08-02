@@ -49,6 +49,44 @@ def update_conto_usage(db: Session, conto_id: int):
         db.query(Conto).filter(Conto.id == conto_id).update({"lastImport": now})
 
 
+def adjust_parent_netto(
+    db: Session, current_user_id: int, parent_id: int | None, delta: Decimal
+):
+    """Sposta di `delta` l'`importo_netto` della transazione padre di un rimborso.
+
+    `delta` negativo = rimborso applicato (il padre "vale" di meno), positivo =
+    rimborso stornato. Passare dal delta secco a storno+riapplica è l'unico modo
+    per reggere i cambi di `tipo` e di `parent_transaction_id`: con la vecchia
+    logica un rimborso trasformato in uscita lasciava il padre scontato per
+    sempre di un rimborso che non esisteva più.
+
+    La query è scopata sull'utente come tutte le altre: senza il filtro bastava
+    passare in PUT/DELETE il `parent_transaction_id` di una transazione altrui
+    per alterarne il netto.
+    """
+    if parent_id is None:
+        return
+
+    parent = (
+        db.query(Transazione)
+        .filter(
+            Transazione.id == parent_id,
+            Transazione.user_id == current_user_id,
+        )
+        .first()
+    )
+    if parent is None:
+        return
+
+    # Le righe anteriori alla migration che ha introdotto la colonna hanno il
+    # netto a NULL: il netto di partenza è il lordo.
+    if parent.importo_netto is None:
+        parent.importo_netto = parent.importo
+
+    parent.importo_netto += delta
+    db.add(parent)  # forza SQLAlchemy a tracciare la modifica
+
+
 def resolve_tassonomia(
     db: Session,
     current_user_id: int,
@@ -244,17 +282,14 @@ def create_transazione(
         new_trans = Transazione(**trans_data, user_id=current_user_id)
         db.add(new_trans)
 
-        # --- LOGICA CORRETTA PER AGGIORNARE IL PADRE ---
+        # Il rimborso scala il netto del padre
         if parent_trans:
-            # 1. Inizializza se null
-            if parent_trans.importo_netto is None:
-                parent_trans.importo_netto = parent_trans.importo
-
-            # 2. Sottrai il Decimal
-            parent_trans.importo_netto -= Decimal(str(transazione.importo))
-
-            # 3. FONDAMENTALE: Forza SQLAlchemy a tracciare la modifica
-            db.add(parent_trans)
+            adjust_parent_netto(
+                db,
+                current_user_id,
+                parent_trans.id,
+                -Decimal(str(transazione.importo)),
+            )
 
         # 4. Aggiornamento Saldo (Balance Update)
         if transazione.tipo in (
@@ -544,6 +579,15 @@ def update_transazione(
     old_debito_id = db_trans.debito_id
     old_tipo = db_trans.tipo
     old_conto_dest_id = db_trans.conto_destinazione_id
+    old_parent_id = db_trans.parent_transaction_id
+
+    # Una transazione padre di sé stessa manderebbe in tilt lo storno del netto
+    # (si applicherebbe il delta addosso). Meglio fermarsi qui.
+    if transazione_data.parent_transaction_id == transazione_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A transaction cannot be the parent of itself",
+        )
 
     try:
         # Salviamo importo netto vecchio (o importo se None)
@@ -611,7 +655,10 @@ def update_transazione(
         # Cerchiamo tutti i rimborsi che hanno questa transazione come "padre"
         rimborsi_figli = (
             db.query(Transazione)
-            .filter(Transazione.parent_transaction_id == db_trans.id)
+            .filter(
+                Transazione.parent_transaction_id == db_trans.id,
+                Transazione.user_id == current_user_id,
+            )
             .all()
         )
 
@@ -623,30 +670,34 @@ def update_transazione(
             db.add(rimborso)
         # ---------------------------------------------------------
 
-        # --- LOGICA CORRETTA AGGIORNAMENTO IMPORTO NETTO ---
+        # --- AGGIORNAMENTO IMPORTO NETTO ---
         new_importo = Decimal(str(db_trans.importo))
         diff_importo = new_importo - old_importo
 
-        # Caso 1: Aggiorno il SUO importo_netto
-        # Il nuovo importo netto è il vecchio importo netto + la variazione dell'importo lordo
+        # Il netto della riga stessa segue la variazione del lordo, così gli
+        # eventuali rimborsi già scontati restano scontati.
         db_trans.importo_netto = old_importo_netto + diff_importo
 
-        # Caso 2: Se è un RIMBORSO, aggiorno il PADRE
-        if db_trans.tipo == TipoTransazione.RIMBORSO and db_trans.parent_transaction_id:
-            parent = (
-                db.query(Transazione)
-                .filter(Transazione.id == db_trans.parent_transaction_id)
-                .first()
+        # Effetto sul PADRE: stessa strategia di saldo e residuo del debito,
+        # cioè storno del vecchio movimento e applicazione del nuovo. Applicare
+        # solo `diff_importo` al padre corrente reggeva un cambio di importo, ma
+        # non un cambio di `tipo` (il vecchio padre restava scontato a vita) né
+        # uno spostamento del rimborso su un altro padre (il vecchio non veniva
+        # ripristinato e il nuovo veniva scontato della sola differenza).
+        era_rimborso = (
+            old_tipo == TipoTransazione.RIMBORSO and old_parent_id is not None
+        )
+        e_rimborso = (
+            db_trans.tipo == TipoTransazione.RIMBORSO
+            and db_trans.parent_transaction_id is not None
+        )
+
+        if era_rimborso:
+            adjust_parent_netto(db, current_user_id, old_parent_id, old_importo)
+        if e_rimborso:
+            adjust_parent_netto(
+                db, current_user_id, db_trans.parent_transaction_id, -new_importo
             )
-            if parent:
-                if parent.importo_netto is None:
-                    parent.importo_netto = parent.importo
-
-                # Se l'importo del rimborso aumenta (diff > 0), il netto del padre DEVE DIMINUIRE
-                parent.importo_netto -= diff_importo
-
-                # Forza SQLAlchemy a tracciare la modifica
-                db.add(parent)
 
         # C. Recupero il CONTO DI DESTINAZIONE (potrebbe essere lo stesso o uno nuovo)
         conto_nuovo = (
@@ -777,16 +828,10 @@ def delete_transazione(
     # Se sto cancellando un RIMBORSO, devo ripristinare l'importo netto del PADRE
     # Nota: lo facciamo prima del commit finale, ma dopo aver verificato che la transazione esiste
     if db_trans.tipo == TipoTransazione.RIMBORSO and db_trans.parent_transaction_id:
-        parent = (
-            db.query(Transazione)
-            .filter(Transazione.id == db_trans.parent_transaction_id)
-            .first()
+        # Cancellando il rimborso, il padre "recupera" quel valore nel netto
+        adjust_parent_netto(
+            db, current_user_id, db_trans.parent_transaction_id, db_trans.importo
         )
-        if parent:
-            if parent.importo_netto is None:
-                parent.importo_netto = parent.importo
-            # Cancellando il rimborso, il padre "recupera" quel valore nel netto
-            parent.importo_netto += db_trans.importo
 
     conto = (
         db.query(Conto)
@@ -853,7 +898,10 @@ def delete_transazione(
         # sul saldo (ognuno sul proprio conto), altrimenti il saldo resta sfasato.
         figli_rimborsi = (
             db.query(Transazione)
-            .filter(Transazione.parent_transaction_id == db_trans.id)
+            .filter(
+                Transazione.parent_transaction_id == db_trans.id,
+                Transazione.user_id == current_user_id,
+            )
             .all()
         )
         for figlio in figli_rimborsi:
