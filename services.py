@@ -12,7 +12,7 @@ import logging
 from database import SessionLocal
 import models
 from dateutil.relativedelta import relativedelta
-from sqlalchemy.orm import Query
+from sqlalchemy.orm import Query, Session
 from sqlalchemy import asc, desc, func
 from pydantic import BaseModel
 from decimal import Decimal, InvalidOperation
@@ -1240,3 +1240,17 @@ def apply_filters_and_sort(query: Query, model, filters):
         query = query.order_by(desc(model.id))
 
     return query
+
+
+def remember_last_tag(db: Session, user_id: int, tag_id: Optional[int]) -> None:
+    """Memorizza il tag appena usato come default del prossimo inserimento.
+
+    Scrive anche quando `tag_id` è None, e non è una svista: azzerare è metà
+    della funzione. Salvare una transazione senza tag è il modo in cui l'utente
+    dice "basta precompilare", quindi NULL va persistito come qualsiasi altro
+    valore. Il commit resta al chiamante, dentro la stessa transazione DB della
+    creazione: se quella fallisce, il default non deve muoversi.
+    """
+    db.query(models.User).filter(models.User.id == user_id).update(
+        {"last_tag_id": tag_id}
+    )

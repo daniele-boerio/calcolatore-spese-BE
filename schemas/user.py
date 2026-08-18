@@ -64,6 +64,8 @@ class UserResponse(BaseModel):
     total_budget: Optional[Decimal] = None
     # True solo per l'utente admin dell'Open Banking (vedi OPEN_BANKING_ADMIN_EMAIL)
     is_open_banking_admin: bool = False
+    # Tag da preselezionare nel form di nuova transazione (vedi User.last_tag_id)
+    last_tag_id: Optional[int] = None
 
     @field_validator("total_budget", mode="after")
     @classmethod

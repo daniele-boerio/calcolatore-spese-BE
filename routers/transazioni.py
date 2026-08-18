@@ -13,7 +13,7 @@ from schemas import (
 )
 from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
-from services import apply_filters_and_sort
+from services import apply_filters_and_sort, remember_last_tag
 from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
@@ -343,6 +343,13 @@ def create_transazione(
         # AGGIORNAMENTO lastImport / Usage
         update_category_usage(db, new_trans.categoria_id, new_trans.sottocategoria_id)
         update_conto_usage(db, transazione.conto_id)
+
+        # Il tag appena scelto diventa il default del prossimo inserimento.
+        # Solo quando l'ha scelto davvero l'utente: il giroconto il campo tag non
+        # ce l'ha (lo forziamo a NULL) e il rimborso eredita quello del padre —
+        # farli scrivere il default lo cambierebbe alle spalle dell'utente.
+        if transazione.tipo != TipoTransazione.RICARICA and not parent_trans:
+            remember_last_tag(db, current_user_id, new_trans.tag_id)
 
         db.commit()
         db.refresh(new_trans)

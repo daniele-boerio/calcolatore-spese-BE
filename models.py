@@ -22,6 +22,12 @@ class User(Base):
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
     total_budget = Column(Numeric(10, 2), nullable=True)
+    # Ultimo tag scelto creando una transazione: precompila il form del prossimo
+    # inserimento. NULL non è "non impostato" ma "nessun default": salvare una
+    # transazione senza tag lo azzera, ed è così che si disattiva la precompilazione.
+    last_tag_id = Column(
+        Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True
+    )
 
     conti = relationship(
         "Conto",
