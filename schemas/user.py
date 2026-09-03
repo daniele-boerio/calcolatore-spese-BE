@@ -45,10 +45,18 @@ class ResetPasswordRequest(BaseModel):
 
 
 class UserBudgetUpdate(BaseModel):
+    """Aggiornamento parziale: i campi non inviati restano com'erano.
+
+    I due budget sono cose diverse — `total_budget` è l'obiettivo di risparmio,
+    `monthly_spending_budget` il tetto di spesa — e si impostano da due controlli
+    separati, quindi l'endpoint legge solo i campi presenti nel payload.
+    """
+
     # Cambiato in Decimal per coerenza finanziaria
     total_budget: Optional[Decimal] = None
+    monthly_spending_budget: Optional[Decimal] = None
 
-    @field_validator("total_budget", mode="after")
+    @field_validator("total_budget", "monthly_spending_budget", mode="after")
     @classmethod
     def round_budget(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None:
@@ -62,12 +70,13 @@ class UserResponse(BaseModel):
     email: str
     # Aggiungiamo il budget alla risposta se serve al frontend per la BudgetCard
     total_budget: Optional[Decimal] = None
+    monthly_spending_budget: Optional[Decimal] = None
     # True solo per l'utente admin dell'Open Banking (vedi OPEN_BANKING_ADMIN_EMAIL)
     is_open_banking_admin: bool = False
     # Tag da preselezionare nel form di nuova transazione (vedi User.last_tag_id)
     last_tag_id: Optional[int] = None
 
-    @field_validator("total_budget", mode="after")
+    @field_validator("total_budget", "monthly_spending_budget", mode="after")
     @classmethod
     def round_budget(cls, v: Optional[Decimal]) -> Optional[Decimal]:
         if v is not None:

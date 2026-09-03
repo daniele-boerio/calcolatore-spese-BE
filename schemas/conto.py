@@ -85,3 +85,39 @@ class ContoFilters:
 
     def model_dump(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
+
+
+class PeriodoOut(BaseModel):
+    start: date
+    end: date
+
+
+class SavingsBudgetOut(BaseModel):
+    """Obiettivo di risparmio: quanto l'utente punta a mettere da parte."""
+
+    total_budget: Optional[Decimal] = None
+    remaining: Decimal
+    percentage: Optional[float] = None
+    period: PeriodoOut
+
+
+class SpendingBudgetOut(BaseModel):
+    """Tetto di spesa: quanto l'utente si concede di spendere nel mese.
+
+    È il riferimento dell'hero della Home. `remaining` può essere negativo — è lo
+    sforamento — e resta `None` finché un tetto non è stato impostato.
+    """
+
+    budget: Optional[Decimal] = None
+    spent: Decimal
+    # Uscite ricorrenti attive non ancora scattate entro fine mese.
+    projected: Decimal
+    remaining: Optional[Decimal] = None
+    percentage: Optional[float] = None
+
+
+class CurrentMonthBudgetOut(BaseModel):
+    monthly_budget: SavingsBudgetOut
+    spending: SpendingBudgetOut
+    income: Decimal
+    saved: Decimal

@@ -15,6 +15,10 @@ from .conto import (
     ContoUpdate,
     ContoOut,
     ContoFilters,
+    PeriodoOut,
+    SavingsBudgetOut,
+    SpendingBudgetOut,
+    CurrentMonthBudgetOut,
 )
 from .categoria import (
     CategoriaBase,

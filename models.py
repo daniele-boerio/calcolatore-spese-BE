@@ -21,7 +21,12 @@ class User(Base):
     username = Column(String, unique=False, nullable=False)
     email = Column(String, unique=True, index=True, nullable=False)
     hashed_password = Column(String, nullable=False)
+    # Obiettivo di risparmio mensile: quanto l'utente punta a mettere da parte.
     total_budget = Column(Numeric(10, 2), nullable=True)
+    # Tetto di spesa mensile: quanto l'utente si concede di spendere. Concetto
+    # distinto da total_budget — è il riferimento dell'hero della Home
+    # ("speso X su un budget di Y, restano Z").
+    monthly_spending_budget = Column(Numeric(10, 2), nullable=True)
     # Ultimo tag scelto creando una transazione: precompila il form del prossimo
     # inserimento. NULL non è "non impostato" ma "nessun default": salvare una
     # transazione senza tag lo azzera, ed è così che si disattiva la precompilazione.

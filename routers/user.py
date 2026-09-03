@@ -7,7 +7,13 @@ from routers.conti import compute_current_month_budget
 import auth
 from fastapi.security import OAuth2PasswordRequestForm
 from models import User
-from schemas import Token, UserCreate, UserBudgetUpdate, UserResponse
+from schemas import (
+    Token,
+    UserCreate,
+    UserBudgetUpdate,
+    UserResponse,
+    CurrentMonthBudgetOut,
+)
 from rate_limit import limiter
 
 router = APIRouter(tags=["User"])
@@ -195,7 +201,7 @@ def get_me(
     return response
 
 
-@router.put("/monthlyBudget")
+@router.put("/monthlyBudget", response_model=CurrentMonthBudgetOut)
 def update_monthly_budget(
     budget_data: UserBudgetUpdate,
     db: Session = Depends(get_db),
@@ -209,8 +215,11 @@ def update_monthly_budget(
         )
 
     try:
-        # Aggiornamento budget
-        user.total_budget = budget_data.total_budget
+        # Aggiornamento parziale: obiettivo di risparmio e tetto di spesa si
+        # impostano da due controlli separati, quindi un payload con solo uno dei
+        # due non deve azzerare l'altro. Passare esplicitamente `null` invece sì.
+        for field, value in budget_data.model_dump(exclude_unset=True).items():
+            setattr(user, field, value)
         db.commit()
 
         # Restituiamo i dati aggiornati

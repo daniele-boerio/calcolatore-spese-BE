@@ -5,7 +5,13 @@ from sqlalchemy.orm import Session
 from database import get_db
 import auth
 from models import Categoria, Conto, Transazione, User, Ricorrenza
-from schemas import ContoCreate, ContoOut, ContoUpdate, ContoFilters
+from schemas import (
+    ContoCreate,
+    ContoOut,
+    ContoUpdate,
+    ContoFilters,
+    CurrentMonthBudgetOut,
+)
 from schemas.transazione import TipoTransazione
 from services import apply_filters_and_sort, importo_effettivo
 import calendar
@@ -310,23 +316,27 @@ def compute_current_month_budget(
     # Risparmio del mese: entrate - uscite - accantonamenti
     remaining_amount = total_in - total_out - total_accantonamento
 
+    # Ricorrenze attive non ancora scattate entro fine mese. Servono sempre:
+    # l'hero della Home disegna il segmento "previsto" accanto allo speso, e il
+    # flag qui sotto le somma anche al risparmio.
+    def _recurring_total(tipo: TipoTransazione) -> Decimal:
+        return (
+            db.query(func.sum(Ricorrenza.importo))
+            .filter(
+                Ricorrenza.user_id == current_user_id,
+                Ricorrenza.tipo == tipo,
+                Ricorrenza.attiva,
+                Ricorrenza.prossima_esecuzione >= today,
+                Ricorrenza.prossima_esecuzione <= last_day,
+            )
+            .scalar()
+            or Decimal("0")
+        )
+
+    recurring_out = _recurring_total(TipoTransazione.USCITA)
+    recurring_in = _recurring_total(TipoTransazione.ENTRATA)
+
     if include_future_recurring:
-        recurring_out = db.query(func.sum(Ricorrenza.importo)).filter(
-            Ricorrenza.user_id == current_user_id,
-            Ricorrenza.tipo == TipoTransazione.USCITA,
-            Ricorrenza.attiva,
-            Ricorrenza.prossima_esecuzione >= today,
-            Ricorrenza.prossima_esecuzione <= last_day,
-        ).scalar() or Decimal("0")
-
-        recurring_in = db.query(func.sum(Ricorrenza.importo)).filter(
-            Ricorrenza.user_id == current_user_id,
-            Ricorrenza.tipo == TipoTransazione.ENTRATA,
-            Ricorrenza.attiva,
-            Ricorrenza.prossima_esecuzione >= today,
-            Ricorrenza.prossima_esecuzione <= last_day,
-        ).scalar() or Decimal("0")
-
         remaining_amount += recurring_in - recurring_out
 
     percentage = None
@@ -334,17 +344,35 @@ def compute_current_month_budget(
         # Calcolo percentuale del risparmio rispetto all'obiettivo
         percentage = round(float(remaining_amount / user.total_budget * 100), 1)
 
+    # Tetto di spesa: concetto distinto dall'obiettivo di risparmio qui sopra.
+    # `remaining` può essere negativo — è lo sforamento, e l'hero lo mostra.
+    spending_budget = user.monthly_spending_budget
+    spending_percentage = None
+    spending_remaining = None
+    if spending_budget and spending_budget > Decimal("0"):
+        spending_percentage = round(float(total_out / spending_budget * 100), 1)
+        spending_remaining = spending_budget - total_out
+
     return {
         "monthly_budget": {
             "total_budget": user.total_budget,
             "remaining": remaining_amount,
             "percentage": percentage,
             "period": {"start": first_day, "end": last_day},
-        }
+        },
+        "spending": {
+            "budget": spending_budget,
+            "spent": total_out,
+            "projected": recurring_out,
+            "remaining": spending_remaining,
+            "percentage": spending_percentage,
+        },
+        "income": total_in,
+        "saved": total_accantonamento,
     }
 
 
-@router.get("/currentMonthExpenses")
+@router.get("/currentMonthExpenses", response_model=CurrentMonthBudgetOut)
 def get_current_month_expenses(
     include_future_recurring: bool = Query(
         False,
