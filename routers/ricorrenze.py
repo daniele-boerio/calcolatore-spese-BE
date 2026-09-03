@@ -5,7 +5,8 @@ from database import get_db
 import auth
 from models import Ricorrenza, Conto
 from schemas import RicorrenzaOut, RicorrenzaCreate, RicorrenzaUpdate, RicorrenzaFilters
-from services import apply_filters_and_sort
+from services import apply_filters_and_sort, esegui_ricorrenza
+from datetime import date
 
 router = APIRouter(prefix="/ricorrenze", tags=["Ricorrenze"])
 
@@ -110,6 +111,64 @@ def update_ricorrenza(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Failed to update the recurring transaction",
+        )
+
+
+@router.post("/{ricorrenza_id}/esegui", response_model=RicorrenzaOut)
+def esegui_ricorrenza_ora(
+    ricorrenza_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Registra adesso una ricorrenza già scaduta.
+
+    Serve quando lo scheduler notturno non è passato (macchina spenta, deploy
+    a cavallo di mezzanotte): la ricorrenza resta indietro e da qui la si
+    sblocca a mano. Non anticipa niente — una ricorrenza non ancora scaduta
+    viene rifiutata — quindi non può fare doppioni con il task.
+    """
+    db_ric = (
+        db.query(Ricorrenza)
+        .filter(Ricorrenza.id == ricorrenza_id, Ricorrenza.user_id == current_user_id)
+        .first()
+    )
+
+    if not db_ric:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Recurring transaction not found",
+        )
+
+    if not db_ric.attiva:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A suspended recurring transaction cannot be executed",
+        )
+
+    today = date.today()
+
+    if db_ric.prossima_esecuzione > today:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="This recurring transaction is not due yet",
+        )
+
+    try:
+        esegui_ricorrenza(db, db_ric, today)
+        db.commit()
+        db.refresh(db_ric)
+        return db_ric
+    except ValueError as e:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot execute the recurring transaction: {e}",
+        )
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to execute the recurring transaction",
         )
 
 

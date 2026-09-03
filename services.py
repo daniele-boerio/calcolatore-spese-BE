@@ -160,6 +160,60 @@ def task_aggiornamento_prezzi():
         db.close()
 
 
+def esegui_ricorrenza(db: Session, ric: models.Ricorrenza, today: date):
+    """Registra una ricorrenza: crea la transazione, muove il saldo, sposta la
+    data alla prossima occorrenza.
+
+    Una funzione sola perché la chiamano in due — lo scheduler notturno e il
+    bottone "Registra" delle ricorrenze rimaste indietro — e due copie della
+    stessa aritmetica sulle date divergono al primo mese di 31 giorni.
+
+    Non fa commit: lo decide il chiamante, che sa se sta processando una
+    ricorrenza o mille. Solleva ValueError se il conto non è utilizzabile.
+    """
+    conto = db.query(models.Conto).get(ric.conto_id)
+
+    if conto is None:
+        raise ValueError("conto inesistente")
+
+    # Conto in soft-delete: niente transazioni fantasma su un conto nascosto.
+    if conto.deleted_at is not None:
+        raise ValueError("conto eliminato")
+
+    nuova_trans = models.Transazione(
+        importo=ric.importo,
+        importo_netto=ric.importo,
+        tipo=ric.tipo,
+        descrizione=f"Ricorrente: {ric.nome}",
+        data=today,
+        conto_id=ric.conto_id,
+        user_id=ric.user_id,
+        categoria_id=ric.categoria_id,
+        sottocategoria_id=ric.sottocategoria_id,
+        tag_id=ric.tag_id,
+    )
+
+    if str(ric.tipo).upper() == "ENTRATA":
+        conto.saldo += ric.importo
+    else:
+        conto.saldo -= ric.importo
+
+    # La prossima occorrenza si conta dalla data prevista, non da oggi:
+    # registrare in ritardo non deve spostare in avanti tutte le successive.
+    if ric.frequenza == "GIORNALIERA":
+        ric.prossima_esecuzione += timedelta(days=1)
+    elif ric.frequenza == "SETTIMANALE":
+        ric.prossima_esecuzione += timedelta(weeks=1)
+    elif ric.frequenza == "MENSILE":
+        ric.prossima_esecuzione += relativedelta(months=1)
+    elif ric.frequenza == "ANNUALE":
+        ric.prossima_esecuzione += relativedelta(years=1)
+
+    db.add(nuova_trans)
+
+    return nuova_trans
+
+
 def task_transazioni_ricorrenti():
     db = SessionLocal()
     today = date.today()
@@ -178,53 +232,15 @@ def task_transazioni_ricorrenti():
         for ric in ricorrenze:
             # Isoliamo ogni ricorrenza: un errore su una non deve bloccare le altre.
             try:
-                conto = db.query(models.Conto).get(ric.conto_id)
-                if conto is None:
-                    logger.warning(
-                        "Ricorrenza %s: conto %s inesistente, salto",
-                        ric.id,
-                        ric.conto_id,
-                    )
-                    continue
-
-                # Conto in soft-delete: la ricorrenza resta sospesa finché il conto
-                # non viene ripristinato (niente transazioni fantasma su un conto nascosto).
-                if conto.deleted_at is not None:
-                    continue
-
-                # 2. Crea la transazione reale
-                nuova_trans = models.Transazione(
-                    importo=ric.importo,
-                    importo_netto=ric.importo,
-                    tipo=ric.tipo,
-                    descrizione=f"Ricorrente: {ric.nome}",
-                    data=today,
-                    conto_id=ric.conto_id,
-                    user_id=ric.user_id,
-                    categoria_id=ric.categoria_id,
-                    sottocategoria_id=ric.sottocategoria_id,
-                    tag_id=ric.tag_id,
-                )
-
-                # 3. Aggiorna il saldo del conto associato
-                if str(ric.tipo).upper() == "ENTRATA":
-                    conto.saldo += ric.importo
-                else:
-                    conto.saldo -= ric.importo
-
-                # 4. Calcola la prossima data di esecuzione
-                if ric.frequenza == "GIORNALIERA":
-                    ric.prossima_esecuzione += timedelta(days=1)
-                elif ric.frequenza == "SETTIMANALE":
-                    ric.prossima_esecuzione += timedelta(weeks=1)
-                elif ric.frequenza == "MENSILE":
-                    ric.prossima_esecuzione += relativedelta(months=1)
-                elif ric.frequenza == "ANNUALE":
-                    ric.prossima_esecuzione += relativedelta(years=1)
-
-                db.add(nuova_trans)
+                esegui_ricorrenza(db, ric, today)
                 # Commit per-ricorrenza: una riga rotta non perde le altre.
                 db.commit()
+            except ValueError as e:
+                # Conto mancante o eliminato: la ricorrenza resta indietro
+                # finché il conto non torna. Se ne accorge la schermata
+                # Ricorrenze, che la mostra fra le scadute.
+                db.rollback()
+                logger.warning("Ricorrenza %s saltata: %s", ric.id, e)
             except Exception as e:
                 db.rollback()
                 logger.error("Errore eseguendo la ricorrenza %s: %s", ric.id, e)
