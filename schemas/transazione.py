@@ -119,6 +119,9 @@ class TransazioneFilters:
         data_inizio: Optional[date] = Query(None),
         data_fine: Optional[date] = Query(None),
         descrizione: Optional[str] = Query(None),
+        # Non è una colonna: chiede le transazioni a cui la categoria manca.
+        # Serve alla schermata Movimenti per trovare cosa resta da sistemare.
+        senza_categoria: Optional[bool] = Query(None),
         conto_id: Optional[List[int]] = Query(None),
         categoria_id: Optional[List[int]] = Query(
             None
@@ -133,6 +136,7 @@ class TransazioneFilters:
         self.data_inizio = data_inizio
         self.data_fine = data_fine
         self.descrizione = descrizione
+        self.senza_categoria = senza_categoria
         self.conto_id = conto_id
         self.categoria_id = categoria_id
         self.sottocategoria_id = sottocategoria_id

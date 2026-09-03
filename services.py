@@ -1178,6 +1178,14 @@ def apply_filters_and_sort(query: Query, model, filters):
         if value is None:
             continue
 
+        # 0. Assenza di categoria: è un filtro sul NULL, non sul valore, e il
+        # nome del campo non corrisponde a nessuna colonna. Va prima delle
+        # regole per nome, che altrimenti lo scarterebbero in silenzio.
+        if field == "senza_categoria":
+            if value and hasattr(model, "categoria_id"):
+                query = query.filter(model.categoria_id.is_(None))
+            continue
+
         # 1. Gestione LISTE e SINGOLI VALORI (Clausola IN)
         # Se il valore è una lista o un intero per i campi ID
         if field in ["conto_id", "categoria_id", "sottocategoria_id", "tag_id"]:
