@@ -116,6 +116,14 @@ class Conto(Base):
 
     default = Column(Boolean, default=False)
 
+    # Conto aperto dall'app, non dall'utente: il "Portafoglio" di chi non vuole
+    # modellare i propri conti. Resta invisibile finché è l'unico, e i movimenti
+    # che ci stanno sopra si leggono come "senza conto".
+    virtuale = Column(Boolean, nullable=False, default=False)
+
+    # corrente / salvadanaio / prepagata: decide la forma della card in elenco.
+    tipo = Column(String, nullable=True)
+
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
         DateTime,

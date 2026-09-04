@@ -214,6 +214,49 @@ def esegui_ricorrenza(db: Session, ric: models.Ricorrenza, today: date):
     return nuova_trans
 
 
+# Nome del conto che l'app apre da sé. Non è configurabile: chi lo vuole
+# diverso lo rinomina, e da quel momento è un conto come gli altri.
+CONTO_VIRTUALE_NOME = "Portafoglio"
+
+
+def ensure_default_conto(db: Session, user_id: int):
+    """Il conto su cui appoggiare una transazione quando l'utente non ne ha scelto uno.
+
+    Chi apre l'app non deve essere costretto a modellare i propri conti prima
+    di poter registrare una spesa: se non ne ha nessuno gliene apriamo uno noi,
+    marcato `virtuale`, che l'interfaccia tiene nascosto finché resta l'unico.
+
+    Non fa commit: lo decide il chiamante. Ritorna il conto di default
+    dell'utente, o il primo che ha, o quello appena creato.
+    """
+    conti = (
+        db.query(models.Conto)
+        .filter(
+            models.Conto.user_id == user_id,
+            models.Conto.deleted_at.is_(None),
+        )
+        .order_by(models.Conto.id)
+        .all()
+    )
+
+    if conti:
+        # Il default esplicito vince; senza, il più vecchio fa da capofila.
+        return next((c for c in conti if c.default), conti[0])
+
+    conto = models.Conto(
+        nome=CONTO_VIRTUALE_NOME,
+        saldo=Decimal("0.00"),
+        user_id=user_id,
+        default=True,
+        virtuale=True,
+        ricarica_automatica=False,
+    )
+    db.add(conto)
+    db.flush()  # serve l'id a chi la chiama, prima del commit
+
+    return conto
+
+
 def task_transazioni_ricorrenti():
     db = SessionLocal()
     today = date.today()

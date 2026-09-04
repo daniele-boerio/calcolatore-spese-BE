@@ -4,6 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from sqlalchemy.orm import Session
 from database import get_db
 from routers.conti import compute_current_month_budget
+from services import ensure_default_conto
 import auth
 from fastapi.security import OAuth2PasswordRequestForm
 from models import User
@@ -70,6 +71,12 @@ def register_user(
         )
 
         db.add(new_user)
+        db.flush()
+
+        # Un utente nuovo deve poter registrare una spesa subito, senza prima
+        # inventarsi un conto: gliene apriamo uno noi (vedi ensure_default_conto).
+        ensure_default_conto(db, new_user.id)
+
         db.commit()
         db.refresh(new_user)
 

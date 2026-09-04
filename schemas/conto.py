@@ -16,6 +16,8 @@ class ContoBase(BaseModel):
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
     default: bool = False
+    # corrente / salvadanaio / prepagata: decide la forma della card in elenco.
+    tipo: Optional[str] = None
     bank_connector_provider: Optional[str] = None
     bank_connector_account_id: Optional[str] = None
     bank_connector_institution_id: Optional[str] = None
@@ -46,6 +48,7 @@ class ContoUpdate(BaseModel):
     prossimo_controllo: Optional[date] = None
     color: Optional[str] = None
     default: Optional[bool] = None
+    tipo: Optional[str] = None
     bank_connector_provider: Optional[str] = None
     bank_connector_account_id: Optional[str] = None
     bank_connector_institution_id: Optional[str] = None
@@ -61,6 +64,9 @@ class ContoUpdate(BaseModel):
 
 class ContoOut(ContoBase):
     id: int
+    # Sola lettura: lo mette l'app quando apre il conto da sé, e il client lo
+    # usa per sapere che quel conto non va mostrato come gli altri.
+    virtuale: bool = False
     creationDate: datetime
     lastUpdate: datetime
     lastImport: datetime

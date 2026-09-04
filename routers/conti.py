@@ -4,7 +4,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Categoria, Conto, Transazione, User, Ricorrenza
+from models import Categoria, Conto, Debito, Transazione, User, Ricorrenza
 from schemas import (
     ContoCreate,
     ContoOut,
@@ -13,7 +13,7 @@ from schemas import (
     CurrentMonthBudgetOut,
 )
 from schemas.transazione import TipoTransazione
-from services import apply_filters_and_sort, importo_effettivo
+from services import apply_filters_and_sort, ensure_default_conto, importo_effettivo
 import calendar
 from decimal import Decimal
 
@@ -75,6 +75,18 @@ def get_conti(
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
+    # Chi non ha nessun conto ne riceve uno adesso: è il punto in cui ogni
+    # schermata passa prima di poter fare qualcosa, quindi è anche il punto in
+    # cui l'app smette di essere un vicolo cieco per un utente nuovo.
+    if (
+        db.query(Conto)
+        .filter(Conto.user_id == current_user_id, Conto.deleted_at.is_(None))
+        .first()
+        is None
+    ):
+        ensure_default_conto(db, current_user_id)
+        db.commit()
+
     query = db.query(Conto).filter(Conto.user_id == current_user_id)
 
     query = apply_filters_and_sort(
@@ -200,6 +212,175 @@ def delete_conto(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while deleting the account",
+        )
+
+
+def _sposta_su(db: Session, user_id: int, sorgenti: list[int], target: Conto):
+    """Porta su `target` tutto quello che punta ai conti `sorgenti`.
+
+    Tocca anche le transazioni in soft-delete: se un domani vengono
+    ripristinate non devono ritrovarsi appese a un conto che non c'è più.
+    """
+    if not sorgenti:
+        return
+
+    db.query(Transazione).filter(
+        Transazione.user_id == user_id,
+        Transazione.conto_id.in_(sorgenti),
+    ).update({"conto_id": target.id}, synchronize_session=False)
+
+    db.query(Transazione).filter(
+        Transazione.user_id == user_id,
+        Transazione.conto_destinazione_id.in_(sorgenti),
+    ).update({"conto_destinazione_id": target.id}, synchronize_session=False)
+
+    # Un giro fra due conti ora uniti non ha più due estremi: resta la riga,
+    # sparisce la destinazione.
+    db.query(Transazione).filter(
+        Transazione.user_id == user_id,
+        Transazione.conto_destinazione_id.isnot(None),
+        Transazione.conto_destinazione_id == Transazione.conto_id,
+    ).update({"conto_destinazione_id": None}, synchronize_session=False)
+
+    db.query(Ricorrenza).filter(
+        Ricorrenza.user_id == user_id,
+        Ricorrenza.conto_id.in_(sorgenti),
+    ).update({"conto_id": target.id}, synchronize_session=False)
+
+    db.query(Debito).filter(
+        Debito.user_id == user_id,
+        Debito.conto_id.in_(sorgenti),
+    ).update({"conto_id": target.id}, synchronize_session=False)
+
+
+@router.post("/consolida", response_model=ContoOut)
+def consolida_conti(
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Unisce tutti i conti in quello di default.
+
+    Per chi tiene i soldi in un posto solo e non vuole rincorrere il saldo di
+    tre conti: movimenti, ricorrenze, debiti e saldi finiscono sul conto di
+    default, gli altri vanno in soft-delete.
+
+    Idempotente: con un conto solo non fa niente e ritorna quello.
+    """
+    target = ensure_default_conto(db, current_user_id)
+
+    altri = (
+        db.query(Conto)
+        .filter(
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+            Conto.id != target.id,
+        )
+        .all()
+    )
+
+    if not altri:
+        db.commit()
+        db.refresh(target)
+        return target
+
+    try:
+        now = datetime.now(timezone.utc)
+        ids = [conto.id for conto in altri]
+
+        _sposta_su(db, current_user_id, ids, target)
+
+        for conto in altri:
+            target.saldo += conto.saldo
+            conto.deleted_at = now
+            # Il collegamento bancario muore col conto: il default non può
+            # ereditarne più di uno, e tenerli appesi a un conto nascosto
+            # farebbe sincronizzare movimenti che nessuno vedrebbe.
+            conto.bank_connector_provider = None
+            conto.bank_connector_account_id = None
+            conto.bank_connector_institution_id = None
+            conto.bank_connector_session_id = None
+            conto.bank_connector_last_error = None
+
+        # La ricarica automatica pescava da un conto che ora non esiste più.
+        if target.conto_sorgente_id in ids:
+            target.conto_sorgente_id = None
+            target.ricarica_automatica = False
+
+        db.commit()
+        db.refresh(target)
+        return target
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while merging the accounts",
+        )
+
+
+@router.post("/{conto_id}/assorbi", response_model=ContoOut)
+def assorbi_conto_virtuale(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Porta su questo conto i movimenti rimasti sul conto virtuale.
+
+    È il seguito naturale di "ho aperto un conto vero": i movimenti registrati
+    prima, quando un conto non c'era, si leggono come "senza conto" e da qui si
+    assegnano a quello giusto.
+    """
+    target = (
+        db.query(Conto)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+    if not target:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Account not found or unauthorized",
+        )
+
+    if target.virtuale:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The virtual account cannot absorb itself",
+        )
+
+    virtuali = (
+        db.query(Conto)
+        .filter(
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+            Conto.virtuale.is_(True),
+        )
+        .all()
+    )
+
+    if not virtuali:
+        return target
+
+    try:
+        now = datetime.now(timezone.utc)
+
+        _sposta_su(db, current_user_id, [c.id for c in virtuali], target)
+
+        for conto in virtuali:
+            target.saldo += conto.saldo
+            conto.deleted_at = now
+
+        db.commit()
+        db.refresh(target)
+        return target
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while moving the transactions",
         )
 
 

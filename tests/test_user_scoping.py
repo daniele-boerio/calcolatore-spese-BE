@@ -52,7 +52,14 @@ def test_get_conti_returns_only_current_user_accounts(db_session):
     assert all(c.user_id == u1.id for c in result)
 
 
-def test_get_conti_empty_when_user_has_no_accounts(db_session):
+def test_get_conti_apre_il_conto_virtuale_e_non_vede_quelli_altrui(db_session):
+    """Chi non ha conti ne riceve uno suo, non la lista di un altro.
+
+    Prima qui la lista tornava vuota e l'app era un vicolo cieco: senza conto
+    non si poteva registrare niente. Ora `GET /conti` apre il conto virtuale,
+    e il punto che questo test difende resta lo stesso: quello dell'altro
+    utente non deve comparire.
+    """
     owner = _make_user(db_session, "owner", "owner@example.it")
     other = _make_user(db_session, "other", "other@example.it")
 
@@ -65,7 +72,10 @@ def test_get_conti_empty_when_user_has_no_accounts(db_session):
         filters=_no_filters(), db=db_session, current_user_id=owner.id
     )
 
-    assert result == []
+    assert len(result) == 1
+    assert result[0].user_id == owner.id
+    assert result[0].virtuale is True
+    assert result[0].default is True
 
 
 def test_get_conti_excludes_soft_deleted_accounts(db_session):
