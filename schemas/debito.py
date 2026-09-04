@@ -40,6 +40,9 @@ class DebitoUpdate(BaseModel):
 
 class DebitoOut(DebitoBase):
     id: int
+    # Mese in cui il debito si chiude al ritmo tenuto finora ("2027-06").
+    # Nullo quando un ritmo non c'è: con meno di due pagamenti non si stima.
+    fine_stimata: Optional[str] = None
     creationDate: datetime
     lastUpdate: datetime
 

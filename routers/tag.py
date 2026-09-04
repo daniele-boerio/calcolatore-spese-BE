@@ -2,7 +2,8 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Tag
+from models import Tag, Transazione
+from sqlalchemy import func
 from schemas import TagCreate, TagOut, TagUpdate, TagFilters
 from services import apply_filters_and_sort
 
@@ -56,7 +57,28 @@ def get_tags(
         Tag,
         filters=filters,
     )
-    return query.all()
+
+    tags = query.all()
+
+    # Un COUNT solo per tutti i tag, non uno per tag: la lista è corta ma
+    # crescerebbe, e N+1 query su una schermata di sola lettura non si fanno.
+    conteggi = dict(
+        db.query(Transazione.tag_id, func.count(Transazione.id))
+        .filter(
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
+            Transazione.tag_id.isnot(None),
+        )
+        .group_by(Transazione.tag_id)
+        .all()
+    )
+
+    return [
+        TagOut.model_validate(tag).model_copy(
+            update={"n_transazioni": conteggi.get(tag.id, 0)}
+        )
+        for tag in tags
+    ]
 
 
 @router.put("/{tag_id}", response_model=TagOut)

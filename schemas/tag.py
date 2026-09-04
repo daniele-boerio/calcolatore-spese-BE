@@ -18,6 +18,9 @@ class TagUpdate(TagBase):
 
 class TagOut(TagBase):
     id: int
+    # Quante transazioni lo usano: serve a mostrare i tag per quanto pesano
+    # invece che in ordine alfabetico e basta.
+    n_transazioni: int = 0
     creationDate: datetime
     lastUpdate: datetime
 

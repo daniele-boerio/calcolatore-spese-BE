@@ -93,6 +93,15 @@ class ContoFilters:
         return {k: v for k, v in self.__dict__.items() if v is not None}
 
 
+class PatrimonioOut(BaseModel):
+    """Una foto mensile del patrimonio, come "2026-09"."""
+
+    label: str
+    conti: Decimal
+    titoli: Decimal
+    totale: Decimal
+
+
 class PeriodoOut(BaseModel):
     start: date
     end: date

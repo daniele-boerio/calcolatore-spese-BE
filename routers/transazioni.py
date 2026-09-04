@@ -13,7 +13,11 @@ from schemas import (
 )
 from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
-from services import apply_filters_and_sort, remember_last_tag
+from services import (
+    apply_filters_and_sort,
+    remember_last_tag,
+    saldo_dopo_transazione,
+)
 from datetime import datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
@@ -534,6 +538,43 @@ def get_transazioni(
         "total_rimborsi": total_rimborsi,
         "data": data,
     }
+
+
+@router.get("/{transazione_id}", response_model=TransazioneOut)
+def get_transazione(
+    transazione_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Una transazione sola, col saldo del conto subito dopo.
+
+    Il dettaglio di un movimento è l'unico posto in cui quel numero serve, ed
+    è anche l'unico in cui si può calcolare senza far pagare a una lista una
+    somma progressiva per riga.
+    """
+    transazione = (
+        db.query(Transazione)
+        .filter(
+            Transazione.id == transazione_id,
+            Transazione.user_id == current_user_id,
+            Transazione.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+    if not transazione:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Transaction not found",
+        )
+
+    return TransazioneOut.model_validate(
+        transazione, from_attributes=True
+    ).model_copy(
+        update={
+            "saldo_dopo": saldo_dopo_transazione(db, transazione, current_user_id)
+        }
+    )
 
 
 @router.get("", response_model=list[TransazioneOut])

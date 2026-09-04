@@ -54,6 +54,10 @@ class TransazioneOut(TransazioneBase):
     lastUpdate: datetime
     importo_netto: Optional[Decimal] = None
     split_group_id: Optional[int] = None
+    # Saldo del conto subito dopo questa transazione. Lo riempie solo la GET
+    # del singolo movimento: calcolarlo per ogni riga di una lista vorrebbe
+    # dire una somma progressiva per riga.
+    saldo_dopo: Optional[Decimal] = None
 
     @field_validator("importo_netto", mode="after")
     @classmethod

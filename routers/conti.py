@@ -4,13 +4,22 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Categoria, Conto, Debito, Transazione, User, Ricorrenza
+from models import (
+    Categoria,
+    Conto,
+    Debito,
+    PatrimonioSnapshot,
+    Transazione,
+    User,
+    Ricorrenza,
+)
 from schemas import (
     ContoCreate,
     ContoOut,
     ContoUpdate,
     ContoFilters,
     CurrentMonthBudgetOut,
+    PatrimonioOut,
 )
 from schemas.transazione import TipoTransazione
 from services import apply_filters_and_sort, ensure_default_conto, importo_effettivo
@@ -251,6 +260,37 @@ def _sposta_su(db: Session, user_id: int, sorgenti: list[int], target: Conto):
         Debito.user_id == user_id,
         Debito.conto_id.in_(sorgenti),
     ).update({"conto_id": target.id}, synchronize_session=False)
+
+
+@router.get("/patrimonio", response_model=list[PatrimonioOut])
+def get_patrimonio(
+    mesi: int = Query(12, ge=1, le=60),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Le foto mensili del patrimonio, dalla più vecchia alla più recente.
+
+    La lista parte dal giorno in cui il job ha iniziato a scattarle: prima non
+    c'è niente, e chi la legge deve mostrare un confronto solo quando ci sono
+    due foto — non inventarne uno.
+    """
+    righe = (
+        db.query(PatrimonioSnapshot)
+        .filter(PatrimonioSnapshot.user_id == current_user_id)
+        .order_by(PatrimonioSnapshot.anno.desc(), PatrimonioSnapshot.mese.desc())
+        .limit(mesi)
+        .all()
+    )
+
+    return [
+        PatrimonioOut(
+            label=f"{riga.anno}-{riga.mese:02d}",
+            conti=riga.conti,
+            titoli=riga.titoli,
+            totale=riga.conti + riga.titoli,
+        )
+        for riga in reversed(righe)
+    ]
 
 
 @router.post("/consolida", response_model=ContoOut)

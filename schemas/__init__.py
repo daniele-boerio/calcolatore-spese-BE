@@ -16,6 +16,7 @@ from .conto import (
     ContoUpdate,
     ContoOut,
     ContoFilters,
+    PatrimonioOut,
     PeriodoOut,
     SavingsBudgetOut,
     SpendingBudgetOut,

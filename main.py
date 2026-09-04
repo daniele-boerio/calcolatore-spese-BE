@@ -12,6 +12,7 @@ from slowapi.errors import RateLimitExceeded
 
 from rate_limit import limiter
 from services import (
+    task_snapshot_patrimonio,
     task_aggiornamento_prezzi,
     task_transazioni_ricorrenti,
     task_ricarica_automatica_conti,
@@ -48,6 +49,9 @@ RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "true").lower() in ("1", "true", "yes
 scheduler = BackgroundScheduler()
 scheduler.add_job(task_aggiornamento_prezzi, "cron", hour=2, minute=0)
 scheduler.add_job(task_transazioni_ricorrenti, "cron", hour=3, minute=0)
+# Ogni notte riscrive la foto del mese in corso: quella che resta a fine mese
+# è l'ultima scattata, ed è quella che serve al confronto.
+scheduler.add_job(task_snapshot_patrimonio, "cron", hour=1, minute=30)
 scheduler.add_job(task_ricarica_automatica_conti, "cron", hour=4, minute=0)
 # Ogni 6 ore (4 volte/giorno): le API AIS (PSD2) limitano gli accessi non
 # presidiati, quindi una sync oraria genera 429 "Too Many Requests".

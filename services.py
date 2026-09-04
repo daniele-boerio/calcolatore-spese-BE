@@ -13,9 +13,9 @@ from database import SessionLocal
 import models
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Query, Session
-from sqlalchemy import asc, desc, func
+from sqlalchemy import and_, asc, desc, func, or_
 from pydantic import BaseModel
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import Optional
 
 # Configura il logging
@@ -255,6 +255,182 @@ def ensure_default_conto(db: Session, user_id: int):
     db.flush()  # serve l'id a chi la chiama, prima del commit
 
     return conto
+
+
+def effetto_sul_conto(transazione: models.Transazione, conto_id: int) -> Decimal:
+    """Di quanto questa transazione ha mosso il saldo di quel conto.
+
+    Lo stesso conto può comparire due volte — un giroconto ha una sorgente e
+    una destinazione — quindi i due versi si sommano invece di escludersi.
+    """
+    importo = transazione.importo or Decimal("0")
+    delta = Decimal("0")
+
+    if transazione.conto_id == conto_id:
+        tipo = str(transazione.tipo).upper()
+        # Il saldo si muove col lordo: è quello che è entrato o uscito davvero.
+        delta += importo if tipo in ("ENTRATA", "RIMBORSO") else -importo
+
+    if transazione.conto_destinazione_id == conto_id:
+        delta += importo
+
+    return delta
+
+
+def saldo_dopo_transazione(
+    db: Session, transazione: models.Transazione, user_id: int
+) -> Optional[Decimal]:
+    """Il saldo del conto subito dopo questa transazione.
+
+    Nessuno lo memorizza: si ricava dal saldo di oggi togliendo tutto quello
+    che è successo dopo. Ordine per data e poi per id, lo stesso della lista,
+    così "dopo" vuol dire la stessa cosa in tutte e due.
+    """
+    if transazione.conto_id is None:
+        return None
+
+    conto = (
+        db.query(models.Conto)
+        .filter(
+            models.Conto.id == transazione.conto_id,
+            models.Conto.user_id == user_id,
+        )
+        .first()
+    )
+
+    if conto is None:
+        return None
+
+    successive = (
+        db.query(models.Transazione)
+        .filter(
+            models.Transazione.user_id == user_id,
+            models.Transazione.deleted_at.is_(None),
+            or_(
+                models.Transazione.conto_id == conto.id,
+                models.Transazione.conto_destinazione_id == conto.id,
+            ),
+            or_(
+                models.Transazione.data > transazione.data,
+                and_(
+                    models.Transazione.data == transazione.data,
+                    models.Transazione.id > transazione.id,
+                ),
+            ),
+        )
+        .all()
+    )
+
+    saldo = conto.saldo or Decimal("0")
+    for riga in successive:
+        saldo -= effetto_sul_conto(riga, conto.id)
+
+    return saldo.quantize(Decimal("0.01"))
+
+
+def stima_fine_debito(db: Session, debito: models.Debito) -> Optional[str]:
+    """Il mese in cui il debito si chiude al ritmo tenuto finora, "YYYY-MM".
+
+    I pagamenti sono transazioni con `debito_id`: il ritmo è quanto è stato
+    versato diviso i mesi in cui è successo. Ritorna None quando una stima non
+    si può fare — un debito già chiuso, un solo pagamento, o pagamenti che non
+    coprono nemmeno un mese: meglio niente che una data inventata.
+    """
+    residuo = debito.residuo if debito.residuo is not None else debito.ammontare
+
+    if residuo is None or residuo <= 0:
+        return None
+
+    pagamenti = (
+        db.query(models.Transazione.data, models.Transazione.importo)
+        .filter(
+            models.Transazione.debito_id == debito.id,
+            models.Transazione.user_id == debito.user_id,
+            models.Transazione.deleted_at.is_(None),
+        )
+        .order_by(models.Transazione.data)
+        .all()
+    )
+
+    if len(pagamenti) < 2:
+        return None
+
+    versato = sum((riga.importo for riga in pagamenti), Decimal("0"))
+    if versato <= 0:
+        return None
+
+    primo, ultimo = pagamenti[0].data, pagamenti[-1].data
+    mesi = (ultimo.year - primo.year) * 12 + (ultimo.month - primo.month)
+
+    # Pagamenti tutti nello stesso mese: non dicono ancora un ritmo mensile.
+    if mesi < 1:
+        return None
+
+    al_mese = versato / Decimal(mesi)
+    mancanti = int((residuo / al_mese).to_integral_value(rounding=ROUND_CEILING))
+
+    fine = date.today() + relativedelta(months=mancanti)
+    return f"{fine.year}-{fine.month:02d}"
+
+
+def task_snapshot_patrimonio():
+    """Fotografa il patrimonio di ogni utente per il mese corrente.
+
+    Gira una volta al giorno e riscrive la foto del mese in corso: quella che
+    resta è l'ultima, cioè quella di fine mese. Un mese senza foto — l'app era
+    spenta — resta senza, e l'interfaccia non mostra un confronto invece di
+    inventarne uno.
+    """
+    db = SessionLocal()
+    oggi = date.today()
+
+    try:
+        for (user_id,) in db.query(models.User.id).all():
+            try:
+                conti = (
+                    db.query(func.coalesce(func.sum(models.Conto.saldo), 0))
+                    .filter(
+                        models.Conto.user_id == user_id,
+                        models.Conto.deleted_at.is_(None),
+                    )
+                    .scalar()
+                ) or Decimal("0")
+
+                titoli = sum(
+                    (
+                        inv.valore_posizione
+                        for inv in db.query(models.Investimento)
+                        .filter(models.Investimento.user_id == user_id)
+                        .all()
+                    ),
+                    Decimal("0"),
+                )
+
+                foto = (
+                    db.query(models.PatrimonioSnapshot)
+                    .filter(
+                        models.PatrimonioSnapshot.user_id == user_id,
+                        models.PatrimonioSnapshot.anno == oggi.year,
+                        models.PatrimonioSnapshot.mese == oggi.month,
+                    )
+                    .first()
+                )
+
+                if foto is None:
+                    foto = models.PatrimonioSnapshot(
+                        user_id=user_id, anno=oggi.year, mese=oggi.month
+                    )
+                    db.add(foto)
+
+                foto.conti = conti
+                foto.titoli = titoli
+
+                db.commit()
+            except Exception as e:
+                db.rollback()
+                logger.error("Snapshot patrimonio fallito per %s: %s", user_id, e)
+    finally:
+        db.close()
 
 
 def task_transazioni_ricorrenti():

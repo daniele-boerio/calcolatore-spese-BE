@@ -8,6 +8,7 @@ from sqlalchemy import (
     Boolean,
     Date,
     Index,
+    UniqueConstraint,
 )
 from sqlalchemy.orm import relationship, backref
 from datetime import datetime, timezone
@@ -405,6 +406,34 @@ class StoricoInvestimento(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+
+class PatrimonioSnapshot(Base):
+    """Quanto valevi alla fine di un mese.
+
+    Il saldo dei conti si potrebbe ricostruire dalle transazioni; il valore di
+    mercato dei titoli no, perché lo storico degli investimenti tiene le
+    operazioni e non i prezzi giorno per giorno. Per poter dire "rispetto al
+    mese scorso" la foto va scattata quando il mese finisce.
+    """
+
+    __tablename__ = "patrimonio_snapshots"
+    __table_args__ = (
+        UniqueConstraint("user_id", "anno", "mese", name="uq_patrimonio_utente_mese"),
+    )
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(
+        Integer, ForeignKey("users.id", ondelete="CASCADE"), index=True
+    )
+
+    anno = Column(Integer, nullable=False)
+    mese = Column(Integer, nullable=False)
+
+    conti = Column(Numeric(12, 2), nullable=False, default=0)
+    titoli = Column(Numeric(12, 2), nullable=False, default=0)
+
+    creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Ricorrenza(Base):
