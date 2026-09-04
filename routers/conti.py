@@ -22,7 +22,12 @@ from schemas import (
     PatrimonioOut,
 )
 from schemas.transazione import TipoTransazione
-from services import apply_filters_and_sort, ensure_default_conto, importo_effettivo
+from services import (
+    apply_filters_and_sort,
+    ensure_conto_virtuale,
+    ensure_default_conto,
+    importo_effettivo,
+)
 import calendar
 from decimal import Decimal
 
@@ -354,6 +359,79 @@ def consolida_conti(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="An error occurred while merging the accounts",
+        )
+
+
+@router.post("/rinuncia", response_model=ContoOut)
+def rinuncia_ai_conti(
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Porta tutti i movimenti sul conto invisibile e leva di mezzo i conti veri.
+
+    È il verso opposto di `assorbi`: là un conto vero si prende i movimenti
+    rimasti senza conto, qui i movimenti tornano tutti a non averne uno. Serve a
+    chi le spese vuole segnarle e basta, senza modellare da dove escono.
+
+    Nessuna transazione viene toccata nel merito: cambia solo il conto a cui
+    punta. I conti veri vanno in soft-delete come in `consolida`, quindi niente
+    è distrutto e restano ripristinabili con POST /conti/{id}/restore — quello
+    che non si ricostruisce è *quale* movimento stava su quale conto.
+
+    Idempotente: chi ha già solo il conto invisibile se lo ritrova identico.
+    """
+    target = ensure_conto_virtuale(db, current_user_id)
+
+    reali = (
+        db.query(Conto)
+        .filter(
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+            Conto.virtuale.is_(False),
+        )
+        .all()
+    )
+
+    if not reali:
+        db.commit()
+        db.refresh(target)
+        return target
+
+    try:
+        now = datetime.now(timezone.utc)
+        ids = [conto.id for conto in reali]
+
+        _sposta_su(db, current_user_id, ids, target)
+
+        for conto in reali:
+            # Il saldo non si perde per strada: il patrimonio in cima a Conti
+            # somma anche il conto invisibile, e azzerarlo qui farebbe sparire
+            # dei soldi che nessuno ha chiesto di far sparire.
+            target.saldo += conto.saldo
+            conto.deleted_at = now
+            conto.default = False
+            # Come in `consolida`: un collegamento bancario appeso a un conto
+            # nascosto sincronizzerebbe movimenti che nessuno vede.
+            conto.bank_connector_provider = None
+            conto.bank_connector_account_id = None
+            conto.bank_connector_institution_id = None
+            conto.bank_connector_session_id = None
+            conto.bank_connector_last_error = None
+
+        # Resta l'unico conto: è lui il default, e non ha più da dove ricaricarsi.
+        target.default = True
+        if target.conto_sorgente_id in ids:
+            target.conto_sorgente_id = None
+            target.ricarica_automatica = False
+
+        db.commit()
+        db.refresh(target)
+        return target
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while moving the transactions",
         )
 
 

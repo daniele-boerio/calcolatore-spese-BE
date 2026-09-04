@@ -243,7 +243,33 @@ def ensure_default_conto(db: Session, user_id: int):
         # Il default esplicito vince; senza, il più vecchio fa da capofila.
         return next((c for c in conti if c.default), conti[0])
 
-    conto = models.Conto(
+    return ensure_conto_virtuale(db, user_id)
+
+
+def ensure_conto_virtuale(db: Session, user_id: int):
+    """Il conto invisibile dell'utente, aperto adesso se non ce l'ha.
+
+    `ensure_default_conto` ne apre uno solo a chi non ha proprio nessun conto.
+    Qui serve anche a chi i conti ce li ha e sta scegliendo di non gestirli più:
+    i movimenti devono pur appoggiarsi da qualche parte, e quel posto è questo.
+
+    Non fa commit: lo decide il chiamante.
+    """
+    virtuale = (
+        db.query(models.Conto)
+        .filter(
+            models.Conto.user_id == user_id,
+            models.Conto.deleted_at.is_(None),
+            models.Conto.virtuale.is_(True),
+        )
+        .order_by(models.Conto.id)
+        .first()
+    )
+
+    if virtuale:
+        return virtuale
+
+    virtuale = models.Conto(
         nome=CONTO_VIRTUALE_NOME,
         saldo=Decimal("0.00"),
         user_id=user_id,
@@ -251,10 +277,10 @@ def ensure_default_conto(db: Session, user_id: int):
         virtuale=True,
         ricarica_automatica=False,
     )
-    db.add(conto)
+    db.add(virtuale)
     db.flush()  # serve l'id a chi la chiama, prima del commit
 
-    return conto
+    return virtuale
 
 
 def effetto_sul_conto(transazione: models.Transazione, conto_id: int) -> Decimal:

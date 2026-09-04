@@ -294,3 +294,102 @@ def test_il_conto_virtuale_e_marcato_solo_quando_lo_apre_lapp(client, auth_heade
         assert len(virtuali) == 1
     finally:
         session.close()
+
+
+# --- Rinuncia ai conti --------------------------------------------------
+
+
+def test_rinuncia_porta_tutto_sul_conto_invisibile(client, auth_headers):
+    """Il verso opposto di `assorbi`: i movimenti tornano a non avere un conto."""
+    vero = crea_conto(client, auth_headers, "Principale", 1000)
+    client.post(f"/conti/{vero['id']}/assorbi", headers=auth_headers)
+    prepagata = crea_conto(client, auth_headers, "Prepagata", 300)
+
+    spesa(client, auth_headers, vero["id"], 10)
+    spesa(client, auth_headers, prepagata["id"], 40)
+
+    r = client.post("/conti/rinuncia", headers=auth_headers)
+    assert r.status_code == 200, r.text
+    assert r.json()["virtuale"] is True
+
+    conti = client.get("/conti", headers=auth_headers).json()
+    assert len(conti) == 1
+    assert conti[0]["virtuale"] is True
+    assert conti[0]["default"] is True
+    # 1000 − 10 + (300 − 40): il patrimonio non cambia, cambia solo dove sta.
+    assert float(conti[0]["saldo"]) == 1250.0
+
+    # Ed è questo il punto: i movimenti restano tutti visibili.
+    movimenti = client.get("/transazioni", headers=auth_headers).json()
+    assert len(movimenti) == 2
+    assert {m["conto_id"] for m in movimenti} == {conti[0]["id"]}
+
+
+def test_rinuncia_apre_il_conto_invisibile_se_non_c_e_piu(client, auth_headers):
+    """Dopo un `assorbi` il virtuale non esiste: va riaperto, non cercato invano."""
+    vero = crea_conto(client, auth_headers, "Principale", 50)
+    client.post(f"/conti/{vero['id']}/assorbi", headers=auth_headers)
+    spesa(client, auth_headers, vero["id"], 5)
+
+    conti = client.get("/conti", headers=auth_headers).json()
+    assert [c["virtuale"] for c in conti] == [False]
+
+    r = client.post("/conti/rinuncia", headers=auth_headers)
+    assert r.status_code == 200, r.text
+
+    conti = client.get("/conti", headers=auth_headers).json()
+    assert len(conti) == 1
+    assert conti[0]["virtuale"] is True
+    assert float(conti[0]["saldo"]) == 45.0
+
+    movimento = client.get("/transazioni", headers=auth_headers).json()[0]
+    assert movimento["conto_id"] == conti[0]["id"]
+
+
+def test_rinuncia_e_idempotente(client, auth_headers):
+    crea_conto(client, auth_headers, "Principale", 200)
+
+    assert client.post("/conti/rinuncia", headers=auth_headers).status_code == 200
+    saldo = client.get("/conti", headers=auth_headers).json()[0]["saldo"]
+
+    # Secondo giro a vuoto: il saldo non deve raddoppiare.
+    assert client.post("/conti/rinuncia", headers=auth_headers).status_code == 200
+    conti = client.get("/conti", headers=auth_headers).json()
+
+    assert len(conti) == 1
+    assert conti[0]["saldo"] == saldo
+
+
+def test_rinuncia_sposta_anche_le_transazioni_nascoste(client, auth_headers):
+    vero = crea_conto(client, auth_headers, "Principale", 0)
+    movimento = spesa(client, auth_headers, vero["id"], 15)
+
+    session = client.session_factory()
+    try:
+        riga = session.query(Transazione).get(int(movimento["id"]))
+        riga.deleted_at = date.today()
+        session.commit()
+    finally:
+        session.close()
+
+    assert client.post("/conti/rinuncia", headers=auth_headers).status_code == 200
+
+    virtuale = client.get("/conti", headers=auth_headers).json()[0]
+    session = client.session_factory()
+    try:
+        riga = session.query(Transazione).get(int(movimento["id"]))
+        # Se un domani viene ripristinata non deve appendersi a un conto sparito.
+        assert riga.conto_id == int(virtuale["id"])
+    finally:
+        session.close()
+
+
+def test_rinuncia_non_tocca_i_conti_di_un_altro_utente(client, auth_headers):
+    altri_headers = registra(client, "luigi")
+    suo = crea_conto(client, altri_headers, "Suo", 500)
+
+    crea_conto(client, auth_headers, "Mio", 100)
+    assert client.post("/conti/rinuncia", headers=auth_headers).status_code == 200
+
+    conti_altrui = client.get("/conti", headers=altri_headers).json()
+    assert float(next(c for c in conti_altrui if c["id"] == suo["id"])["saldo"]) == 500.0
