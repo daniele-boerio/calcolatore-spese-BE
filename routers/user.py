@@ -13,6 +13,7 @@ from schemas import (
     UserCreate,
     UserBudgetUpdate,
     UserResponse,
+    UserUpdate,
     CurrentMonthBudgetOut,
 )
 from rate_limit import limiter
@@ -206,6 +207,59 @@ def get_me(
     response = UserResponse.model_validate(user)
     response.is_open_banking_admin = is_open_banking_admin
     return response
+
+
+@router.put("/me", response_model=UserResponse)
+def update_me(
+    payload: UserUpdate,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Cambia lo username dal profilo.
+
+    Le stesse regole della registrazione: minuscolo e unico. Il token resta
+    valido — l'identità è l'id, non il nome.
+    """
+    username = payload.username.strip().lower()
+
+    if not username:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Missing fields. Please provide a username",
+        )
+
+    user = db.query(User).filter(User.id == current_user_id).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="User not found. Your session may have expired",
+        )
+
+    if username != user.username:
+        taken = (
+            db.query(User)
+            .filter(User.username == username, User.id != current_user_id)
+            .first()
+        )
+        if taken:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="The username you selected is not available",
+            )
+
+    try:
+        user.username = username
+        db.commit()
+        db.refresh(user)
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while updating the profile",
+        )
+
+    return get_me(db=db, current_user_id=current_user_id)
 
 
 @router.put("/monthlyBudget", response_model=CurrentMonthBudgetOut)

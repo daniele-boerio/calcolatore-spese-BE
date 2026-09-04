@@ -5,6 +5,7 @@ from .user import (
     Token,
     LoginRequest,
     UserBudgetUpdate,
+    UserUpdate,
     UserResponse,
     ForgotPasswordRequest,
     ResetPasswordRequest,

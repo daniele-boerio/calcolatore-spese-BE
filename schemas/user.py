@@ -44,6 +44,17 @@ class ResetPasswordRequest(BaseModel):
     )
 
 
+class UserUpdate(BaseModel):
+    """Quello che l'utente può cambiare di sé dal profilo.
+
+    Solo lo username: l'email identifica l'account (ci arriva il link di reset
+    password) e cambiarla è un'altra cosa; la password si cambia dal flusso di
+    reset, che passa dalla casella di posta.
+    """
+
+    username: str
+
+
 class UserBudgetUpdate(BaseModel):
     """Aggiornamento parziale: i campi non inviati restano com'erano.
 
