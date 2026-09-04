@@ -1,6 +1,6 @@
 import os
 import logging
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from sqlalchemy.orm import Session
 from database import get_db
 from routers.conti import compute_current_month_budget
@@ -265,6 +265,10 @@ def update_me(
 @router.put("/monthlyBudget", response_model=CurrentMonthBudgetOut)
 def update_monthly_budget(
     budget_data: UserBudgetUpdate,
+    include_future_recurring: bool = Query(
+        False,
+        description="Include future active recurring expenses within the current month",
+    ),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
@@ -283,8 +287,12 @@ def update_monthly_budget(
             setattr(user, field, value)
         db.commit()
 
-        # Restituiamo i dati aggiornati
-        return compute_current_month_budget(db, current_user_id)
+        # Restituiamo i dati aggiornati. Il flag va ripassato: la risposta
+        # sostituisce la card del mese nello store del FE, e ricalcolarla col
+        # default direbbe "senza ricorrenti future" a chi la spunta ce l'ha.
+        return compute_current_month_budget(
+            db, current_user_id, include_future_recurring
+        )
     except HTTPException:
         db.rollback()
         raise

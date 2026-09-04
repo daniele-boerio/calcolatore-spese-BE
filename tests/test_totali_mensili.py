@@ -246,3 +246,55 @@ def test_accantonamento_riduce_il_risparmio_una_volta_sola(client, auth_headers,
     assert float(budget["monthly_budget"]["remaining"]) == 300.0
     assert stats["totale_accantonamento"] == 200.0
     assert stats["totale"] == 300.0
+
+
+def _ricorrenza_futura(client, conto, importo, tipo="USCITA"):
+    """Ricorrenza attiva che scatta entro fine mese, ma non ancora scattata."""
+    db = client.session_factory()
+    try:
+        db.add(
+            models.Ricorrenza(
+                nome="Affitto",
+                importo=importo,
+                tipo=tipo,
+                frequenza="MENSILE",
+                # Oggi rientra sempre nella finestra [oggi, fine mese], anche
+                # l'ultimo giorno del mese.
+                prossima_esecuzione=date.today(),
+                attiva=True,
+                conto_id=conto["id"],
+                user_id=db.get(models.Conto, conto["id"]).user_id,
+            )
+        )
+        db.commit()
+    finally:
+        db.close()
+
+
+def test_put_monthly_budget_rispetta_le_ricorrenti_future(client, auth_headers, conto):
+    """La PUT risponde con la card ricalcolata: deve guardare lo stesso flag della GET.
+
+    Senza, salvare il tetto di spesa con la spunta accesa rimandava indietro una
+    card calcolata "senza ricorrenti future", e il risparmio del mese tornava su.
+    """
+    _ricorrenza_futura(client, conto, importo=200)
+
+    senza = client.put(
+        "/monthlyBudget",
+        json={"total_budget": 500},
+        headers=auth_headers,
+    )
+    con = client.put(
+        "/monthlyBudget?include_future_recurring=true",
+        json={"total_budget": 500},
+        headers=auth_headers,
+    )
+
+    assert senza.status_code == 200, senza.text
+    assert con.status_code == 200, con.text
+
+    risparmio_senza = float(senza.json()["monthly_budget"]["remaining"])
+    risparmio_con = float(con.json()["monthly_budget"]["remaining"])
+
+    # L'uscita ricorrente non ancora scattata pesa solo quando la si include.
+    assert risparmio_con == risparmio_senza - 200
