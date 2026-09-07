@@ -15,6 +15,7 @@ from schemas.transazione import TipoTransazione
 from models import Conto, Transazione
 from services import (
     apply_filters_and_sort,
+    importo_effettivo,
     remember_last_tag,
     saldo_dopo_transazione,
 )
@@ -499,32 +500,34 @@ def get_transazioni(
     # 2. Calcolo Totale Record (count ignora l'order_by automaticamente)
     total = base_query.count()
 
-    # 3. Calcolo Totale Entrate
-    # Rimuoviamo l'ordinamento con .order_by(None) per evitare il GroupingError
-    total_entrata = (
-        base_query.filter(Transazione.tipo == TipoTransazione.ENTRATA)
-        .order_by(None)
-        .with_entities(func.sum(Transazione.importo))
-        .scalar()
-        or Decimal("0.00")  # <--- Qui
-    )
+    # 3. Totali per tipo, sull'importo EFFETTIVO.
+    #
+    # `importo_effettivo()` e non `Transazione.importo`: è la regola che vale
+    # per ogni altro aggregato dell'app (budget, statistiche, grafici), e questi
+    # totali sono un aggregato come gli altri. Sommando il lordo, una spesa da
+    # 100 rimborsata di 30 restava "100" qui e "70" sulla Home — lo stesso mese,
+    # due cifre diverse sotto la stessa parola.
+    #
+    # Il rimborso sta già dentro al netto del padre, quindi NON va sommato una
+    # seconda volta a parte: chi legge questi totali calcola il saldo come
+    # entrate meno uscite, senza rimetterci i rimborsi (che altrimenti
+    # conterebbero due volte). `total_rimborsi` resta come informazione — quanto
+    # è tornato indietro — non come addendo.
+    #
+    # `.order_by(None)` toglie l'ordinamento, che su un aggregato darebbe
+    # GroupingError.
+    def _totale(tipo: TipoTransazione) -> Decimal:
+        return (
+            base_query.filter(Transazione.tipo == tipo)
+            .order_by(None)
+            .with_entities(func.sum(importo_effettivo()))
+            .scalar()
+            or Decimal("0.00")
+        )
 
-    # 4. Calcolo Totale Uscite
-    total_uscita = (
-        base_query.filter((Transazione.tipo == TipoTransazione.USCITA))
-        .order_by(None)
-        .with_entities(func.sum(Transazione.importo))
-        .scalar()
-        or Decimal("0.00")  # <--- Qui
-    )
-
-    total_rimborsi = (
-        base_query.filter((Transazione.tipo == TipoTransazione.RIMBORSO))
-        .order_by(None)
-        .with_entities(func.sum(Transazione.importo))
-        .scalar()
-        or Decimal("0.00")  # <--- Qui
-    )
+    total_entrata = _totale(TipoTransazione.ENTRATA)
+    total_uscita = _totale(TipoTransazione.USCITA)
+    total_rimborsi = _totale(TipoTransazione.RIMBORSO)
 
     # 5. Recupero dati paginati (qui l'ordinamento serve e rimane quello di base_query)
     data = base_query.offset(offset).limit(size).all()
