@@ -1,6 +1,7 @@
 from datetime import datetime
+from decimal import Decimal
 from fastapi import Query
-from pydantic import BaseModel, ConfigDict  # Aggiornato a V2
+from pydantic import BaseModel, ConfigDict, field_validator  # Aggiornato a V2
 from typing import List, Optional
 from .sottocategoria import SottocategoriaCreate, SottocategoriaOut
 
@@ -9,6 +10,13 @@ class CategoriaBase(BaseModel):
     nome: str
     solo_entrata: bool = True
     solo_uscita: bool = True
+    # Tetto di spesa mensile desiderato. Nullo = nessun budget deciso.
+    budget_mensile: Optional[Decimal] = None
+
+    @field_validator("budget_mensile", mode="after")
+    @classmethod
+    def round_budget(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        return v.quantize(Decimal("0.01")) if v is not None else v
 
 
 class CategoriaCreate(CategoriaBase):
@@ -19,6 +27,14 @@ class CategoriaUpdate(BaseModel):  # Rendo i campi opzionali per la PATCH
     nome: Optional[str] = None
     solo_entrata: Optional[bool] = None
     solo_uscita: Optional[bool] = None
+    # Mandarlo a `null` toglie il budget: `exclude_unset` nel router distingue
+    # "non l'ho toccato" da "l'ho tolto".
+    budget_mensile: Optional[Decimal] = None
+
+    @field_validator("budget_mensile", mode="after")
+    @classmethod
+    def round_budget(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        return v.quantize(Decimal("0.01")) if v is not None else v
 
 
 class CategoriaOut(CategoriaBase):

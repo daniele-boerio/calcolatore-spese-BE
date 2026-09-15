@@ -189,6 +189,11 @@ class Categoria(Base):
     solo_entrata = Column(Boolean, default=True)
     solo_uscita = Column(Boolean, default=True)
 
+    # Quanto si vorrebbe spendere in un mese su questa categoria. Nullo vuol
+    # dire che un budget non è stato deciso: zero sarebbe "non spenderci
+    # niente", che è un'altra cosa e va poter essere detta.
+    budget_mensile = Column(Numeric(10, 2), nullable=True)
+
     # Una categoria ha più sottocategorie
     sottocategorie = relationship(
         "Sottocategoria",

@@ -52,6 +52,7 @@ def create_categoria(
             user_id=current_user_id,
             solo_entrata=cat_solo_entrata,
             solo_uscita=cat_solo_uscita,
+            budget_mensile=categoria.budget_mensile,
             sottocategorie=sottocategorie,
         )
 
