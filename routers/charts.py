@@ -6,7 +6,7 @@ from typing import Optional, List
 from pydantic import BaseModel
 from database import get_db
 from auth import get_current_user_id
-from models import Transazione, Categoria
+from models import Transazione, Categoria, Sottocategoria
 from services import importo_effettivo
 
 router = APIRouter(prefix="/charts", tags=["Charts"])
@@ -71,6 +71,29 @@ def generate_month_labels(inizio: date, fine: date, multi_year: bool):
     return labels
 
 
+def filtra_tassonomia(
+    query,
+    categoria_id: Optional[int],
+    sottocategoria_id: Optional[List[int]],
+    tag_id: Optional[int],
+):
+    """I filtri dell'Analisi, uguali per tutti e quattro i grafici.
+
+    Prima ogni card guardava l'anno intero e basta: scegliere una categoria in
+    cima alla schermata cambiava le viste Mese e Anno, e qui sotto niente.
+    """
+    if categoria_id:
+        query = query.filter(Transazione.categoria_id == categoria_id)
+
+    if sottocategoria_id:
+        query = query.filter(Transazione.sottocategoria_id.in_(sottocategoria_id))
+
+    if tag_id:
+        query = query.filter(Transazione.tag_id == tag_id)
+
+    return query
+
+
 # --- ENDPOINT ---
 
 
@@ -80,29 +103,32 @@ def get_chart_income_expense(
         None, description="Data inizio (es: 2026-01-01)"
     ),
     data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
+    categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
+    ),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
     inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
 
-    results = (
-        db.query(
-            extract("year", Transazione.data).label("year"),
-            extract("month", Transazione.data).label("month"),
-            Transazione.tipo,
-            func.sum(importo_effettivo()).label("total"),
-        )
-        .filter(
-            Transazione.user_id == current_user_id,
-            Transazione.deleted_at.is_(None),
-            Transazione.data >= inizio,
-            Transazione.data <= fine,
-            Transazione.tipo != "RIMBORSO",
-            Transazione.tipo != "RICARICA",
-        )
-        .group_by("year", "month", Transazione.tipo)
-        .all()
+    query = db.query(
+        extract("year", Transazione.data).label("year"),
+        extract("month", Transazione.data).label("month"),
+        Transazione.tipo,
+        func.sum(importo_effettivo()).label("total"),
+    ).filter(
+        Transazione.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
+        Transazione.data >= inizio,
+        Transazione.data <= fine,
+        Transazione.tipo != "RIMBORSO",
+        Transazione.tipo != "RICARICA",
     )
+    query = filtra_tassonomia(query, categoria_id, sottocategoria_id, tag_id)
+
+    results = query.group_by("year", "month", Transazione.tipo).all()
 
     labels = generate_month_labels(inizio, fine, multi_year)
     monthly_data = {
@@ -133,29 +159,32 @@ def get_chart_savings(
         None, description="Data inizio (es: 2026-01-01)"
     ),
     data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
+    categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
+    ),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
     inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
 
-    results = (
-        db.query(
-            extract("year", Transazione.data).label("year"),
-            extract("month", Transazione.data).label("month"),
-            Transazione.tipo,
-            func.sum(importo_effettivo()).label("total"),
-        )
-        .filter(
-            Transazione.user_id == current_user_id,
-            Transazione.deleted_at.is_(None),
-            Transazione.data >= inizio,
-            Transazione.data <= fine,
-            Transazione.tipo != "RIMBORSO",
-            Transazione.tipo != "RICARICA",
-        )
-        .group_by("year", "month", Transazione.tipo)
-        .all()
+    query = db.query(
+        extract("year", Transazione.data).label("year"),
+        extract("month", Transazione.data).label("month"),
+        Transazione.tipo,
+        func.sum(importo_effettivo()).label("total"),
+    ).filter(
+        Transazione.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
+        Transazione.data >= inizio,
+        Transazione.data <= fine,
+        Transazione.tipo != "RIMBORSO",
+        Transazione.tipo != "RICARICA",
     )
+    query = filtra_tassonomia(query, categoria_id, sottocategoria_id, tag_id)
+
+    results = query.group_by("year", "month", Transazione.tipo).all()
 
     labels = generate_month_labels(inizio, fine, multi_year)
     monthly_data = {
@@ -192,17 +221,33 @@ def get_chart_expense_composition(
         None, description="Data inizio (es: 2026-01-01)"
     ),
     data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
+    categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
+    ),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
     inizio, fine, _ = get_date_range(data_inizio, data_fine)
 
+    # Con una categoria scelta le fette sono le sue sottocategorie: una sola
+    # fetta grande quanto tutta la ciambella non direbbe niente. È la stessa
+    # regola di /statistics/yearDetails.
+    etichetta = Sottocategoria.nome if categoria_id else Categoria.nome
+    join_model = Sottocategoria if categoria_id else Categoria
+    join_on = (
+        Transazione.sottocategoria_id == Sottocategoria.id
+        if categoria_id
+        else Transazione.categoria_id == Categoria.id
+    )
+
     query = (
         db.query(
-            Categoria.nome.label("categoria"),
+            etichetta.label("categoria"),
             func.sum(importo_effettivo()).label("total"),
         )
-        .outerjoin(Categoria, Transazione.categoria_id == Categoria.id)
+        .outerjoin(join_model, join_on)
         .filter(
             Transazione.user_id == current_user_id,
             Transazione.deleted_at.is_(None),
@@ -211,8 +256,9 @@ def get_chart_expense_composition(
             Transazione.tipo == "USCITA",
         )
     )
+    query = filtra_tassonomia(query, categoria_id, sottocategoria_id, tag_id)
 
-    results = query.group_by(Categoria.nome).all()
+    results = query.group_by(etichetta).all()
 
     composition = []
     for row in results:
@@ -234,30 +280,32 @@ def get_chart_category_trend(
         None, description="Data inizio (es: 2026-01-01)"
     ),
     data_fine: Optional[date] = Query(None, description="Data fine (es: 2026-12-31)"),
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
+    ),
+    tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
     current_user_id: int = Depends(get_current_user_id),
 ):
     inizio, fine, multi_year = get_date_range(data_inizio, data_fine)
 
-    results = (
-        db.query(
-            extract("year", Transazione.data).label("year"),
-            extract("month", Transazione.data).label("month"),
-            Transazione.tipo,
-            func.sum(importo_effettivo()).label("total"),
-        )
-        .filter(
-            Transazione.user_id == current_user_id,
-            Transazione.deleted_at.is_(None),
-            Transazione.categoria_id == categoria_id,
-            Transazione.data >= inizio,
-            Transazione.data <= fine,
-            Transazione.tipo != "RIMBORSO",
-            Transazione.tipo != "RICARICA",
-        )
-        .group_by("year", "month", Transazione.tipo)
-        .all()
+    query = db.query(
+        extract("year", Transazione.data).label("year"),
+        extract("month", Transazione.data).label("month"),
+        Transazione.tipo,
+        func.sum(importo_effettivo()).label("total"),
+    ).filter(
+        Transazione.user_id == current_user_id,
+        Transazione.deleted_at.is_(None),
+        Transazione.categoria_id == categoria_id,
+        Transazione.data >= inizio,
+        Transazione.data <= fine,
+        Transazione.tipo != "RIMBORSO",
+        Transazione.tipo != "RICARICA",
     )
+    query = filtra_tassonomia(query, None, sottocategoria_id, tag_id)
+
+    results = query.group_by("year", "month", Transazione.tipo).all()
 
     labels = generate_month_labels(inizio, fine, multi_year)
     monthly_data = {label: {"label": label, "spesa": 0.0} for label in labels}
