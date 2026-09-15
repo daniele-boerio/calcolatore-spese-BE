@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import extract, func, case
-from typing import Optional
+from typing import List, Optional
 from database import get_db
 from auth import get_current_user_id
 from models import Transazione, Categoria, Sottocategoria
@@ -24,8 +24,8 @@ def get_calculated_amount():
 def get_year_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
-    sottocategoria_id: Optional[int] = Query(
-        None, description="Filtra per sottocategoria"
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
     ),
     tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
@@ -65,7 +65,7 @@ def get_year_details_statistics(
         query = query.filter(Transazione.categoria_id == categoria_id)
 
     if sottocategoria_id:
-        query = query.filter(Transazione.sottocategoria_id == sottocategoria_id)
+        query = query.filter(Transazione.sottocategoria_id.in_(sottocategoria_id))
 
     if tag_id:
         query = query.filter(Transazione.tag_id == tag_id)
@@ -86,7 +86,7 @@ def get_year_details_statistics(
 
     if sottocategoria_id:
         totals_query = totals_query.filter(
-            Transazione.sottocategoria_id == sottocategoria_id
+            Transazione.sottocategoria_id.in_(sottocategoria_id)
         )
 
     if tag_id:
@@ -130,8 +130,8 @@ def get_month_details_statistics(
     year: int = Query(..., description="L'anno di riferimento"),
     month: int = Query(..., description="Il mese di riferimento (1-12)"),
     categoria_id: Optional[int] = Query(None, description="Filtra per categoria padre"),
-    sottocategoria_id: Optional[int] = Query(
-        None, description="Filtra per sottocategoria"
+    sottocategoria_id: Optional[List[int]] = Query(
+        None, description="Filtra per sottocategoria (ripetibile)"
     ),
     tag_id: Optional[int] = Query(None, description="Filtra per tag"),
     db: Session = Depends(get_db),
@@ -166,7 +166,7 @@ def get_month_details_statistics(
         query = query.filter(Transazione.categoria_id == categoria_id)
 
     if sottocategoria_id:
-        query = query.filter(Transazione.sottocategoria_id == sottocategoria_id)
+        query = query.filter(Transazione.sottocategoria_id.in_(sottocategoria_id))
 
     if tag_id:
         query = query.filter(Transazione.tag_id == tag_id)
@@ -237,7 +237,7 @@ def get_month_details_statistics(
 
     if sottocategoria_id:
         totals_query = totals_query.filter(
-            Transazione.sottocategoria_id == sottocategoria_id
+            Transazione.sottocategoria_id.in_(sottocategoria_id)
         )
 
     if tag_id:

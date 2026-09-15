@@ -74,7 +74,7 @@ def auth_headers(client):
 
 @pytest.fixture()
 def scenario(client, auth_headers):
-    """Categoria "Casa" con due sottocategorie: Affitto 800, Bollette 120."""
+    """Categoria "Casa": Affitto 800, Bollette 120, Manutenzione 50."""
     conto = client.post(
         "/conti",
         json={
@@ -101,6 +101,7 @@ def scenario(client, auth_headers):
         json=[
             {"nome": "Affitto", "categoria_id": categoria_id},
             {"nome": "Bollette", "categoria_id": categoria_id},
+            {"nome": "Manutenzione", "categoria_id": categoria_id},
         ],
         headers=auth_headers,
     )
@@ -128,6 +129,7 @@ def scenario(client, auth_headers):
 
     _spesa(800, sotto["Affitto"])
     _spesa(120, sotto["Bollette"])
+    _spesa(50, sotto["Manutenzione"])
 
     return {
         "categoria_id": categoria_id,
@@ -169,14 +171,48 @@ def test_year_details_filtra_per_sottocategoria(client, auth_headers, scenario):
     assert "Affitto" not in mese
 
 
+def test_month_details_filtra_per_piu_sottocategorie(client, auth_headers, scenario):
+    """Il parametro si ripete: due sottocategorie su tre, e la terza resta fuori."""
+    r = client.get(
+        f"/statistics/monthDetails?year={scenario['anno']}&month={scenario['mese']}"
+        f"&sottocategoria_id={scenario['sottocategorie']['Affitto']}"
+        f"&sottocategoria_id={scenario['sottocategorie']['Bollette']}",
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["totale_uscita"] == -920.0
+    nomi = sorted(s["sottocategoria"] for c in body["data"] for s in c["sottocategorie"])
+    assert nomi == ["Affitto", "Bollette"]
+
+
+def test_year_details_filtra_per_piu_sottocategorie(client, auth_headers, scenario):
+    r = client.get(
+        f"/statistics/yearDetails?year={scenario['anno']}"
+        f"&categoria_id={scenario['categoria_id']}"
+        f"&sottocategoria_id={scenario['sottocategorie']['Bollette']}"
+        f"&sottocategoria_id={scenario['sottocategorie']['Manutenzione']}",
+        headers=auth_headers,
+    )
+    assert r.status_code == 200, r.text
+    body = r.json()
+
+    assert body["totale_uscita"] == -170.0
+    mese = next(m for m in body["data"] if m["month"] == scenario["mese"])
+    assert mese.get("Bollette") == -120.0
+    assert mese.get("Manutenzione") == -50.0
+    assert "Affitto" not in mese
+
+
 def test_senza_filtro_si_vede_tutta_la_categoria(client, auth_headers, scenario):
-    """Il controprova: senza sottocategoria i due movimenti ci sono entrambi."""
+    """Il controprova: senza sottocategoria i movimenti ci sono tutti."""
     r = client.get(
         f"/statistics/monthDetails?year={scenario['anno']}&month={scenario['mese']}",
         headers=auth_headers,
     )
     assert r.status_code == 200, r.text
-    assert r.json()["totale_uscita"] == -920.0
+    assert r.json()["totale_uscita"] == -970.0
 
 
 def test_sottocategoria_di_un_altro_utente_non_apre_niente(client, scenario):
