@@ -5,7 +5,7 @@ import auth
 from schemas import DebitoCreate, DebitoOut, DebitoUpdate
 from schemas.transazione import TransazioneOut, TipoTransazione
 from models import Debito, Conto, Transazione
-from services import stima_fine_debito
+from services import ricorrenza_del_debito, stima_fine_debito
 from decimal import Decimal
 from datetime import date, datetime, timezone
 
@@ -21,12 +21,18 @@ def list_debiti(
 
     # La fine stimata non è una colonna: si legge dai pagamenti ogni volta,
     # così non può restare indietro rispetto a loro.
-    return [
-        DebitoOut.model_validate(debito).model_copy(
-            update={"fine_stimata": stima_fine_debito(db, debito)}
+    risposta = []
+    for debito in debiti:
+        rata = ricorrenza_del_debito(db, debito)
+        risposta.append(
+            DebitoOut.model_validate(debito).model_copy(
+                update={
+                    "fine_stimata": stima_fine_debito(db, debito),
+                    "ricorrenza_id": rata.id if rata is not None else None,
+                }
+            )
         )
-        for debito in debiti
-    ]
+    return risposta
 
 
 @router.post("", response_model=DebitoOut)

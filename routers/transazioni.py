@@ -1,5 +1,9 @@
+import csv
+import io
 import logging
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Annotated, Optional
+from fastapi import APIRouter, Depends, Header, HTTPException, Response, status
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
@@ -18,8 +22,9 @@ from services import (
     importo_effettivo,
     remember_last_tag,
     saldo_dopo_transazione,
+    scala_residuo_debito,
 )
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from models import Categoria, Sottocategoria
 from sqlalchemy import func
 from decimal import Decimal
@@ -152,12 +157,37 @@ def resolve_tassonomia(
     return categoria, sottocategoria, tag
 
 
+def _transazione_per_chiave(
+    db: Session, user_id: int, idempotency_key: Optional[str]
+) -> Optional[Transazione]:
+    if not idempotency_key:
+        return None
+    return (
+        db.query(Transazione)
+        .filter(
+            Transazione.user_id == user_id,
+            Transazione.idempotency_key == idempotency_key,
+        )
+        .first()
+    )
+
+
 @router.post("", response_model=TransazioneOut)
 def create_transazione(
     transazione: TransazioneCreate,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
+    # Scelta dal client, una per salvataggio: se la stessa richiesta arriva due
+    # volte (rete caduta dopo il commit, coda offline che riprova) la seconda
+    # riceve la transazione già creata invece di crearne un doppione.
+    idempotency_key: Annotated[
+        Optional[str], Header(alias="Idempotency-Key", max_length=64)
+    ] = None,
 ):
+    gia_creata = _transazione_per_chiave(db, current_user_id, idempotency_key)
+    if gia_creata is not None:
+        return gia_creata
+
     # 1. Recuperiamo il conto
     conto = (
         db.query(Conto)
@@ -284,7 +314,11 @@ def create_transazione(
         # Inizializziamo importo_netto per la transazione corrente
         trans_data["importo_netto"] = transazione.importo
 
-        new_trans = Transazione(**trans_data, user_id=current_user_id)
+        new_trans = Transazione(
+            **trans_data,
+            user_id=current_user_id,
+            idempotency_key=idempotency_key,
+        )
         db.add(new_trans)
 
         # Il rimborso scala il netto del padre
@@ -334,14 +368,7 @@ def create_transazione(
                 )
 
             # Sottrai l'importo dal residuo del debito; non andare sotto zero
-            if db_debito.residuo is None:
-                db_debito.residuo = db_debito.ammontare
-
-            nuovo_residuo = db_debito.residuo - transazione.importo
-            if nuovo_residuo < Decimal("0"):
-                nuovo_residuo = Decimal("0.00")
-
-            db_debito.residuo = nuovo_residuo
+            scala_residuo_debito(db_debito, transazione.importo)
             db.add(db_debito)
         # --------------------------------------
 
@@ -360,7 +387,22 @@ def create_transazione(
         db.refresh(new_trans)
         return new_trans
 
-    except Exception as e:
+    except HTTPException:
+        db.rollback()
+        raise
+    except IntegrityError:
+        db.rollback()
+        # Due richieste con la stessa chiave arrivate insieme: la prima ha
+        # vinto l'indice unico, questa restituisce quello che ha creato.
+        gia_creata = _transazione_per_chiave(db, current_user_id, idempotency_key)
+        if gia_creata is not None:
+            return gia_creata
+        logger.exception("Errore creazione transazione")
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="An error occurred while creating the transaction",
+        )
+    except Exception:
         db.rollback()
         # Log dell'errore per debugging interno
         logger.exception("Errore creazione transazione")
@@ -541,6 +583,100 @@ def get_transazioni(
         "total_rimborsi": total_rimborsi,
         "data": data,
     }
+
+
+# Intestazioni del CSV: in italiano, perché lo apre l'utente in Excel/Numbers.
+COLONNE_EXPORT = [
+    "Data",
+    "Tipo",
+    "Importo",
+    "Importo netto",
+    "Descrizione",
+    "Conto",
+    "Conto destinazione",
+    "Categoria",
+    "Sottocategoria",
+    "Tag",
+]
+
+
+def _cella_testo(valore: Optional[str]) -> str:
+    """Testo libero sicuro per un foglio di calcolo.
+
+    Una descrizione che inizia con = + - @ verrebbe eseguita come formula
+    all'apertura (CSV injection): l'apostrofo la fa leggere come testo.
+    """
+    if not valore:
+        return ""
+    testo = str(valore)
+    return "'" + testo if testo[0] in "=+-@\t\r" else testo
+
+
+def _cella_importo(valore: Optional[Decimal]) -> str:
+    # Virgola decimale: con il separatore ";" è il formato che Excel in
+    # italiano apre già come numero.
+    if valore is None:
+        return ""
+    return f"{Decimal(valore).quantize(Decimal('0.01'))}".replace(".", ",")
+
+
+@router.get("/export")
+def export_transazioni(
+    filters: TransazioneFilters = Depends(),
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """I movimenti filtrati come CSV, con gli stessi filtri della lista.
+
+    Separatore ";" e virgola decimale (Excel in italiano), BOM UTF-8 così gli
+    accenti si leggono anche in Excel. I nomi di conti e tassonomia si leggono
+    una volta per tabella, non una per riga.
+    """
+    query = db.query(Transazione).filter(Transazione.user_id == current_user_id)
+    query = apply_filters_and_sort(query, Transazione, filters)
+    righe = query.all()
+
+    def nomi(model):
+        return {
+            r.id: r.nome
+            for r in db.query(model.id, model.nome)
+            .filter(model.user_id == current_user_id)
+            .all()
+        }
+
+    conti = nomi(Conto)
+    categorie = nomi(Categoria)
+    sottocategorie = nomi(Sottocategoria)
+    tags = nomi(Tag)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer, delimiter=";", lineterminator="\r\n")
+    writer.writerow(COLONNE_EXPORT)
+
+    for t in righe:
+        writer.writerow(
+            [
+                t.data.isoformat() if t.data else "",
+                t.tipo,
+                _cella_importo(t.importo),
+                _cella_importo(
+                    t.importo_netto if t.importo_netto is not None else t.importo
+                ),
+                _cella_testo(t.descrizione),
+                _cella_testo(conti.get(t.conto_id)),
+                _cella_testo(conti.get(t.conto_destinazione_id)),
+                _cella_testo(categorie.get(t.categoria_id)),
+                _cella_testo(sottocategorie.get(t.sottocategoria_id)),
+                _cella_testo(tags.get(t.tag_id)),
+            ]
+        )
+
+    nome_file = f"movimenti_{date.today().isoformat()}.csv"
+    return Response(
+        content="\ufeff" + buffer.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="{nome_file}"'},
+    )
 
 
 @router.get("/{transazione_id}", response_model=TransazioneOut)

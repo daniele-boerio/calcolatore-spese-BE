@@ -13,7 +13,7 @@ from database import SessionLocal
 import models
 from dateutil.relativedelta import relativedelta
 from sqlalchemy.orm import Query, Session
-from sqlalchemy import and_, asc, desc, func, or_
+from sqlalchemy import and_, asc, case, desc, func, or_
 from pydantic import BaseModel
 from decimal import Decimal, InvalidOperation, ROUND_CEILING
 from typing import Optional
@@ -160,18 +160,61 @@ def task_aggiornamento_prezzi():
         db.close()
 
 
-def esegui_ricorrenza(db: Session, ric: models.Ricorrenza, today: date):
-    """Registra una ricorrenza: crea la transazione, muove il saldo, sposta la
+def _prossima_occorrenza(data: date, frequenza: str) -> date:
+    if frequenza == "GIORNALIERA":
+        return data + timedelta(days=1)
+    if frequenza == "SETTIMANALE":
+        return data + timedelta(weeks=1)
+    if frequenza == "MENSILE":
+        return data + relativedelta(months=1)
+    if frequenza == "ANNUALE":
+        return data + relativedelta(years=1)
+    raise ValueError(f"frequenza sconosciuta: {frequenza}")
+
+
+def ricorrenza_terminata(ric: models.Ricorrenza) -> bool:
+    """Oltre la data di fine o senza più rate: non deve scattare più."""
+    if ric.data_fine is not None and ric.prossima_esecuzione > ric.data_fine:
+        return True
+    if ric.rate_rimanenti is not None and ric.rate_rimanenti <= 0:
+        return True
+    return False
+
+
+def esegui_ricorrenza(
+    db: Session,
+    ric: models.Ricorrenza,
+    today: date,
+    importo: Optional[Decimal] = None,
+) -> Optional[models.Transazione]:
+    """Registra UNA occorrenza: crea la transazione, muove il saldo, sposta la
     data alla prossima occorrenza.
 
     Una funzione sola perché la chiamano in due — lo scheduler notturno e il
     bottone "Registra" delle ricorrenze rimaste indietro — e due copie della
     stessa aritmetica sulle date divergono al primo mese di 31 giorni.
 
-    Non fa commit: lo decide il chiamante, che sa se sta processando una
-    ricorrenza o mille. Solleva ValueError se il conto non è utilizzabile.
+    La transazione prende la data *prevista*, non quella di oggi: un affitto
+    del 30 registrato il 2 per un server spento resta nel mese giusto.
+
+    `importo` sostituisce quello della ricorrenza (obbligatorio se è a importo
+    variabile). Restituisce None se la ricorrenza era già terminata (e la
+    sospende). Non fa commit: lo decide il chiamante, che sa se sta
+    processando una ricorrenza o mille. Solleva ValueError se il conto non è
+    utilizzabile o manca l'importo di una ricorrenza variabile.
     """
-    conto = db.query(models.Conto).get(ric.conto_id)
+    if ricorrenza_terminata(ric):
+        ric.attiva = False
+        return None
+
+    if ric.importo_variabile and importo is None:
+        raise ValueError("importo variabile da confermare")
+
+    conto = (
+        db.query(models.Conto)
+        .filter(models.Conto.id == ric.conto_id, models.Conto.user_id == ric.user_id)
+        .first()
+    )
 
     if conto is None:
         raise ValueError("conto inesistente")
@@ -180,34 +223,55 @@ def esegui_ricorrenza(db: Session, ric: models.Ricorrenza, today: date):
     if conto.deleted_at is not None:
         raise ValueError("conto eliminato")
 
+    importo_reale = (importo if importo is not None else ric.importo).quantize(
+        Decimal("0.01")
+    )
+
+    debito = None
+    if ric.debito_id is not None:
+        debito = (
+            db.query(models.Debito)
+            .filter(
+                models.Debito.id == ric.debito_id,
+                models.Debito.user_id == ric.user_id,
+            )
+            .first()
+        )
+
     nuova_trans = models.Transazione(
-        importo=ric.importo,
-        importo_netto=ric.importo,
+        importo=importo_reale,
+        importo_netto=importo_reale,
         tipo=ric.tipo,
         descrizione=f"Ricorrente: {ric.nome}",
-        data=today,
+        data=ric.prossima_esecuzione,
         conto_id=ric.conto_id,
         user_id=ric.user_id,
         categoria_id=ric.categoria_id,
         sottocategoria_id=ric.sottocategoria_id,
         tag_id=ric.tag_id,
+        debito_id=debito.id if debito is not None else None,
     )
 
-    if str(ric.tipo).upper() == "ENTRATA":
-        conto.saldo += ric.importo
-    else:
-        conto.saldo -= ric.importo
+    # Stessa regola dei movimenti inseriti a mano: un rimborso alza il saldo.
+    applica_effetto_saldo(db, nuova_trans, ric.user_id)
+
+    if debito is not None:
+        scala_residuo_debito(debito, importo_reale)
+        # Debito estinto: le rate finiscono qui.
+        if debito.residuo is not None and debito.residuo <= 0:
+            ric.attiva = False
 
     # La prossima occorrenza si conta dalla data prevista, non da oggi:
     # registrare in ritardo non deve spostare in avanti tutte le successive.
-    if ric.frequenza == "GIORNALIERA":
-        ric.prossima_esecuzione += timedelta(days=1)
-    elif ric.frequenza == "SETTIMANALE":
-        ric.prossima_esecuzione += timedelta(weeks=1)
-    elif ric.frequenza == "MENSILE":
-        ric.prossima_esecuzione += relativedelta(months=1)
-    elif ric.frequenza == "ANNUALE":
-        ric.prossima_esecuzione += relativedelta(years=1)
+    ric.prossima_esecuzione = _prossima_occorrenza(
+        ric.prossima_esecuzione, ric.frequenza
+    )
+
+    if ric.rate_rimanenti is not None:
+        ric.rate_rimanenti -= 1
+
+    if ricorrenza_terminata(ric):
+        ric.attiva = False
 
     db.add(nuova_trans)
 
@@ -303,6 +367,179 @@ def effetto_sul_conto(transazione: models.Transazione, conto_id: int) -> Decimal
     return delta
 
 
+def applica_effetto_saldo(
+    db: Session, transazione, user_id: int, segno: int = 1
+) -> None:
+    """Muove i saldi dei conti toccati da `transazione` (segno=-1 per stornare).
+
+    Unico posto in cui un movimento diventa aritmetica sul saldo: si appoggia a
+    `effetto_sul_conto`, la stessa regola con cui `saldo_dopo_transazione` e il
+    controllo dei saldi rileggono la storia. Due regole diverse per scrivere e
+    per rileggere sono il modo più rapido di avere saldi che non tornano.
+
+    `transazione` può essere anche un oggetto qualunque con importo, tipo,
+    conto_id e conto_destinazione_id: serve per stornare i valori *vecchi* di
+    una riga appena modificata.
+    """
+    conti_toccati = {transazione.conto_id, transazione.conto_destinazione_id}
+    conti_toccati.discard(None)
+
+    for conto_id in conti_toccati:
+        conto = (
+            db.query(models.Conto)
+            .filter(models.Conto.id == conto_id, models.Conto.user_id == user_id)
+            .first()
+        )
+        if conto is not None:
+            conto.saldo = (conto.saldo or Decimal("0")) + segno * effetto_sul_conto(
+                transazione, conto_id
+            )
+
+
+def scala_residuo_debito(debito: models.Debito, importo: Decimal) -> None:
+    """Scala `importo` dal residuo (negativo per restituirlo), fra 0 e l'ammontare."""
+    if debito.residuo is None:
+        debito.residuo = debito.ammontare
+
+    nuovo = debito.residuo - importo
+    if nuovo < Decimal("0"):
+        nuovo = Decimal("0.00")
+    if debito.ammontare is not None and nuovo > debito.ammontare:
+        nuovo = debito.ammontare
+
+    debito.residuo = nuovo
+
+
+# --- Controllo dei saldi -----------------------------------------------------
+#
+# Il saldo di un conto è un numero aggiornato a differenze da molti percorsi
+# (creazione, modifica, eliminazione, rimborsi, giroconti, ricorrenze, import
+# dalla banca, ricarica automatica). Non può essere ricalcolato da zero perché
+# l'utente lo imposta anche a mano. Teniamo allora la sua "base": saldo meno
+# l'effetto dei movimenti attivi. Un movimento la lascia invariata per
+# costruzione; se cambia senza che l'utente abbia corretto il saldo, qualche
+# percorso ha sbagliato i conti.
+
+
+def base_saldo_calcolata(db: Session, conto: models.Conto) -> Decimal:
+    """Saldo attuale meno l'effetto di tutti i movimenti attivi del conto."""
+    db.flush()
+
+    T = models.Transazione
+    entrata = T.tipo.in_(("ENTRATA", "RIMBORSO"))
+
+    effetti = (
+        db.query(
+            func.coalesce(
+                func.sum(
+                    case(
+                        (and_(T.conto_id == conto.id, entrata), T.importo),
+                        (T.conto_id == conto.id, -T.importo),
+                        else_=0,
+                    )
+                    + case((T.conto_destinazione_id == conto.id, T.importo), else_=0)
+                ),
+                0,
+            )
+        )
+        .filter(
+            T.user_id == conto.user_id,
+            T.deleted_at.is_(None),
+            or_(T.conto_id == conto.id, T.conto_destinazione_id == conto.id),
+        )
+        .scalar()
+    )
+
+    saldo = conto.saldo or Decimal("0")
+    return (saldo - Decimal(str(effetti or 0))).quantize(Decimal("0.01"))
+
+
+def allinea_saldo_base(db: Session, conto: models.Conto) -> None:
+    """Prende il saldo attuale come giusto: da chiamare quando l'utente lo
+    imposta a mano o quando un'operazione sposta saldi senza movimenti."""
+    conto.saldo_base = base_saldo_calcolata(db, conto)
+
+
+def allinea_saldi_base_utente(db: Session, user_id: int) -> None:
+    """Riallinea tutti i conti dell'utente.
+
+    Per le operazioni strutturali sui conti (elimina, ripristina, consolida,
+    assorbi): nascondere o spostare i movimenti di un conto cambia anche la
+    base dei conti con cui aveva giroconti, senza che ci sia un errore.
+    """
+    # La sessione non fa autoflush: un conto appena ripristinato o eliminato
+    # va scritto prima di elencare quelli attivi.
+    db.flush()
+
+    for conto in (
+        db.query(models.Conto)
+        .filter(models.Conto.user_id == user_id, models.Conto.deleted_at.is_(None))
+        .all()
+    ):
+        allinea_saldo_base(db, conto)
+
+
+def verifica_saldi(db: Session, user_id: int) -> list[dict]:
+    """I conti il cui saldo non torna con i movimenti.
+
+    Un conto mai fotografato (base NULL) viene fotografato adesso e non conta
+    come discrepanza: è il punto di partenza. Non fa commit.
+    """
+    discrepanze = []
+
+    for conto in (
+        db.query(models.Conto)
+        .filter(models.Conto.user_id == user_id, models.Conto.deleted_at.is_(None))
+        .order_by(models.Conto.id)
+        .all()
+    ):
+        calcolata = base_saldo_calcolata(db, conto)
+
+        if conto.saldo_base is None:
+            conto.saldo_base = calcolata
+            continue
+
+        differenza = calcolata - conto.saldo_base
+        if differenza != 0:
+            discrepanze.append(
+                {
+                    "conto_id": conto.id,
+                    "nome": conto.nome,
+                    "saldo": conto.saldo,
+                    # Il saldo che avrebbe se ogni movimento l'avesse mosso giusto
+                    "saldo_atteso": (conto.saldo - differenza).quantize(
+                        Decimal("0.01")
+                    ),
+                    "differenza": differenza,
+                }
+            )
+
+    return discrepanze
+
+
+def task_verifica_saldi():
+    """Controllo notturno: fotografa i conti nuovi e segnala i saldi sfasati."""
+    db = SessionLocal()
+
+    try:
+        for (user_id,) in db.query(models.User.id).all():
+            try:
+                for riga in verifica_saldi(db, user_id):
+                    logger.warning(
+                        "Saldo fuori sincrono: utente %s conto %s, saldo %s, atteso %s",
+                        user_id,
+                        riga["conto_id"],
+                        riga["saldo"],
+                        riga["saldo_atteso"],
+                    )
+                db.commit()
+            except Exception:
+                db.rollback()
+                logger.exception("Verifica saldi fallita per l'utente %s", user_id)
+    finally:
+        db.close()
+
+
 def saldo_dopo_transazione(
     db: Session, transazione: models.Transazione, user_id: int
 ) -> Optional[Decimal]:
@@ -354,8 +591,28 @@ def saldo_dopo_transazione(
     return saldo.quantize(Decimal("0.01"))
 
 
+def ricorrenza_del_debito(
+    db: Session, debito: models.Debito
+) -> Optional[models.Ricorrenza]:
+    """La rata ricorrente attiva che paga questo debito, se c'è."""
+    return (
+        db.query(models.Ricorrenza)
+        .filter(
+            models.Ricorrenza.debito_id == debito.id,
+            models.Ricorrenza.user_id == debito.user_id,
+            models.Ricorrenza.attiva.is_(True),
+        )
+        .order_by(models.Ricorrenza.prossima_esecuzione, models.Ricorrenza.id)
+        .first()
+    )
+
+
 def stima_fine_debito(db: Session, debito: models.Debito) -> Optional[str]:
-    """Il mese in cui il debito si chiude al ritmo tenuto finora, "YYYY-MM".
+    """Il mese in cui il debito si chiude, "YYYY-MM".
+
+    Con una rata ricorrente collegata la data è quella del piano: ultima
+    occorrenza necessaria a coprire il residuo. Senza, si stima dal ritmo dei
+    pagamenti fatti finora.
 
     I pagamenti sono transazioni con `debito_id`: il ritmo è quanto è stato
     versato diviso i mesi in cui è successo. Ritorna None quando una stima non
@@ -366,6 +623,16 @@ def stima_fine_debito(db: Session, debito: models.Debito) -> Optional[str]:
 
     if residuo is None or residuo <= 0:
         return None
+
+    rata = ricorrenza_del_debito(db, debito)
+    if rata is not None and rata.importo and rata.importo > 0:
+        occorrenze = int(
+            (residuo / rata.importo).to_integral_value(rounding=ROUND_CEILING)
+        )
+        ultima = rata.prossima_esecuzione
+        for _ in range(occorrenze - 1):
+            ultima = _prossima_occorrenza(ultima, rata.frequenza)
+        return f"{ultima.year}-{ultima.month:02d}"
 
     pagamenti = (
         db.query(models.Transazione.data, models.Transazione.importo)
@@ -459,36 +726,67 @@ def task_snapshot_patrimonio():
         db.close()
 
 
+# Tetto alle occorrenze recuperate in una notte per una ricorrenza: una
+# giornaliera ferma da un anno sono 365 righe, oltre c'è qualcosa di storto.
+MAX_OCCORRENZE_RECUPERATE = 400
+
+
 def task_transazioni_ricorrenti():
+    """Registra tutte le occorrenze scadute, anche quelle arretrate.
+
+    Ogni occorrenza è una transazione a sé: si rilegge la riga bloccandola
+    (`FOR UPDATE SKIP LOCKED` su Postgres, no-op su SQLite) e si ricontrolla che
+    sia ancora scaduta. Così due processi con lo scheduler acceso — più worker,
+    o due repliche — non registrano mai la stessa occorrenza due volte: il
+    secondo o salta la riga bloccata o la trova già spostata in avanti.
+
+    Le ricorrenze a importo variabile non si registrano da sole: aspettano
+    l'importo vero dalla schermata Ricorrenze.
+    """
     db = SessionLocal()
     today = date.today()
 
     try:
-        # 1. Trova tutte le ricorrenze attive che devono essere eseguite oggi o prima
-        ricorrenze = (
-            db.query(models.Ricorrenza)
+        ids = [
+            rid
+            for (rid,) in db.query(models.Ricorrenza.id)
             .filter(
-                models.Ricorrenza.attiva,
+                models.Ricorrenza.attiva.is_(True),
+                models.Ricorrenza.importo_variabile.is_(False),
                 models.Ricorrenza.prossima_esecuzione <= today,
             )
             .all()
-        )
+        ]
 
-        for ric in ricorrenze:
+        for rid in ids:
             # Isoliamo ogni ricorrenza: un errore su una non deve bloccare le altre.
             try:
-                esegui_ricorrenza(db, ric, today)
-                # Commit per-ricorrenza: una riga rotta non perde le altre.
-                db.commit()
+                for _ in range(MAX_OCCORRENZE_RECUPERATE):
+                    ric = (
+                        db.query(models.Ricorrenza)
+                        .filter(
+                            models.Ricorrenza.id == rid,
+                            models.Ricorrenza.attiva.is_(True),
+                            models.Ricorrenza.prossima_esecuzione <= today,
+                        )
+                        .with_for_update(skip_locked=True)
+                        .first()
+                    )
+                    if ric is None:
+                        break
+
+                    esegui_ricorrenza(db, ric, today)
+                    # Commit per occorrenza: una riga rotta non perde le altre.
+                    db.commit()
             except ValueError as e:
                 # Conto mancante o eliminato: la ricorrenza resta indietro
                 # finché il conto non torna. Se ne accorge la schermata
                 # Ricorrenze, che la mostra fra le scadute.
                 db.rollback()
-                logger.warning("Ricorrenza %s saltata: %s", ric.id, e)
-            except Exception as e:
+                logger.warning("Ricorrenza %s saltata: %s", rid, e)
+            except Exception:
                 db.rollback()
-                logger.error("Errore eseguendo la ricorrenza %s: %s", ric.id, e)
+                logger.exception("Errore eseguendo la ricorrenza %s", rid)
     finally:
         db.close()
 
@@ -497,20 +795,33 @@ def task_ricarica_automatica_conti():
     db = SessionLocal()
     today = date.today()
 
+    da_controllare = (
+        models.Conto.ricarica_automatica.is_(True),
+        models.Conto.prossimo_controllo <= today,
+        models.Conto.deleted_at.is_(None),
+    )
+
     try:
         # Trova i conti con ricarica attiva che devono essere controllati oggi
-        conti_da_controllare = (
-            db.query(models.Conto)
-            .filter(
-                models.Conto.ricarica_automatica,
-                models.Conto.prossimo_controllo <= today,
-                models.Conto.deleted_at.is_(None),
-            )
-            .all()
-        )
+        ids = [
+            cid
+            for (cid,) in db.query(models.Conto.id).filter(*da_controllare).all()
+        ]
 
-        for conto in conti_da_controllare:
+        for cid in ids:
             try:
+                # Riletta e bloccata: con due processi attivi il secondo salta
+                # il conto o lo trova già spostato al prossimo controllo, e la
+                # ricarica non parte due volte (vedi task_transazioni_ricorrenti).
+                conto = (
+                    db.query(models.Conto)
+                    .filter(models.Conto.id == cid, *da_controllare)
+                    .with_for_update(skip_locked=True)
+                    .first()
+                )
+                if conto is None:
+                    continue
+
                 # Se il saldo è sceso sotto la soglia minima
                 if (
                     conto.soglia_minima is not None
@@ -520,8 +831,13 @@ def task_ricarica_automatica_conti():
                     importo_ricarica = (
                         conto.budget_obiettivo - conto.saldo
                     ).quantize(Decimal("0.01"))
-                    conto_sorgente = db.query(models.Conto).get(
-                        conto.conto_sorgente_id
+                    conto_sorgente = (
+                        db.query(models.Conto)
+                        .filter(
+                            models.Conto.id == conto.conto_sorgente_id,
+                            models.Conto.user_id == conto.user_id,
+                        )
+                        .first()
                     )
 
                     if (
@@ -542,10 +858,7 @@ def task_ricarica_automatica_conti():
                             user_id=conto.user_id,
                         )
                         db.add(ricarica)
-
-                        # Aggiorna i saldi
-                        conto_sorgente.saldo -= importo_ricarica
-                        conto.saldo += importo_ricarica
+                        applica_effetto_saldo(db, ricarica, conto.user_id)
 
                 # 4. Calcola il prossimo controllo
                 if conto.frequenza_controllo == "SETTIMANALE":
@@ -554,11 +867,9 @@ def task_ricarica_automatica_conti():
                     conto.prossimo_controllo = today + relativedelta(months=1)
 
                 db.commit()
-            except Exception as e:
+            except Exception:
                 db.rollback()
-                logger.error(
-                    "Errore nella ricarica automatica del conto %s: %s", conto.id, e
-                )
+                logger.exception("Errore nella ricarica automatica del conto %s", cid)
     finally:
         db.close()
 
@@ -957,8 +1268,7 @@ def import_bank_transaction_proposal(db, proposal, import_data, current_user_id)
         tag_id=import_data.tag_id,
     )
 
-    modifier = Decimal("-1") if tipo == "USCITA" else Decimal("1")
-    conto.saldo += importo * modifier
+    applica_effetto_saldo(db, new_trans, current_user_id)
 
     db.add(new_trans)
     db.flush()

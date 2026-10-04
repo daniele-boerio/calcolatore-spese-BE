@@ -17,6 +17,7 @@ from .conto import (
     ContoOut,
     ContoFilters,
     PatrimonioOut,
+    VerificaSaldoOut,
     PeriodoOut,
     SavingsBudgetOut,
     SpendingBudgetOut,
@@ -67,6 +68,7 @@ from .ricorrenza import (
     RicorrenzaBase,
     RicorrenzaCreate,
     RicorrenzaUpdate,
+    RicorrenzaEseguiRequest,
     RicorrenzaOut,
     RicorrenzaFilters,
 )

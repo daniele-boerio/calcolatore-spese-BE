@@ -1,0 +1,39 @@
+# Test del BE a ogni push e pull request.
+#
+# Gli stessi comandi che si lanciano in locale (vedi CLAUDE.md): pytest su
+# SQLite in memoria, quindi niente Postgres da avviare. Python 3.12 come
+# l'immagine del Dockerfile.
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            requirements.txt
+            requirements-dev.txt
+
+      - name: Dipendenze
+        run: pip install -r requirements.txt -r requirements-dev.txt
+
+      - name: Migration con una sola head
+        # Due migration che rivedono la stessa revisione rompono `upgrade head`
+        # in produzione: meglio scoprirlo qui.
+        run: test "$(python -m alembic heads | wc -l)" -eq 1
+
+      - name: Test
+        # Lo scheduler non serve nei test e non deve partire sul runner.
+        env:
+          RUN_SCHEDULER: "false"
+        run: python -m pytest -q

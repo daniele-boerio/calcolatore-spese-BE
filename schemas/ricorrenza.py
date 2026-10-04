@@ -1,5 +1,5 @@
 from datetime import datetime, date
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List
 from decimal import Decimal
 from schemas.transazione import TipoTransazione
@@ -18,6 +18,15 @@ class RicorrenzaBase(BaseModel):
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
+    # Dopo questa data non scatta più (NULL = senza fine)
+    data_fine: Optional[date] = None
+    # Occorrenze che mancano, es. le rate di un finanziamento (NULL = illimitate)
+    rate_rimanenti: Optional[int] = Field(None, ge=0)
+    # Bollette & co.: lo scheduler non la registra, aspetta l'importo vero.
+    # `importo` resta la stima usata nelle previsioni del mese.
+    importo_variabile: bool = False
+    # Rata di un debito: ogni esecuzione ne scala il residuo
+    debito_id: Optional[int] = None
 
     @field_validator("importo", mode="after")
     @classmethod
@@ -43,6 +52,27 @@ class RicorrenzaUpdate(BaseModel):
     categoria_id: Optional[int] = None
     sottocategoria_id: Optional[int] = None
     tag_id: Optional[int] = None
+    data_fine: Optional[date] = None
+    rate_rimanenti: Optional[int] = Field(None, ge=0)
+    importo_variabile: Optional[bool] = None
+    debito_id: Optional[int] = None
+
+    @field_validator("importo", mode="after")
+    @classmethod
+    def round_importo(cls, v: Optional[Decimal]) -> Optional[Decimal]:
+        if v is not None:
+            return v.quantize(Decimal("0.01"))
+        return v
+
+
+class RicorrenzaEseguiRequest(BaseModel):
+    """Corpo opzionale di "Registra": l'importo vero di questa occorrenza.
+
+    Obbligatorio per le ricorrenze a importo variabile; per le altre sostituisce
+    l'importo solo per questa volta.
+    """
+
+    importo: Optional[Decimal] = Field(None, gt=0)
 
     @field_validator("importo", mode="after")
     @classmethod

@@ -20,10 +20,14 @@ from schemas import (
     ContoFilters,
     CurrentMonthBudgetOut,
     PatrimonioOut,
+    VerificaSaldoOut,
 )
 from schemas.transazione import TipoTransazione
 from services import (
+    allinea_saldi_base_utente,
+    allinea_saldo_base,
     apply_filters_and_sort,
+    verifica_saldi,
     ensure_conto_virtuale,
     ensure_default_conto,
     importo_effettivo,
@@ -72,6 +76,9 @@ def create_conto(
 
         new_conto = Conto(**conto.model_dump(), user_id=current_user_id)
         db.add(new_conto)
+        db.flush()
+        # Il saldo iniziale lo decide l'utente: è il punto di partenza.
+        allinea_saldo_base(db, new_conto)
         db.commit()
         db.refresh(new_conto)
         return new_conto
@@ -164,8 +171,16 @@ def update_conto(
         if update_data.get("default") is True:
             reset_default_account(db, current_user_id)
 
+        saldo_prima = db_conto.saldo
+
         for key, value in update_data.items():
             setattr(db_conto, key, value)
+
+        # Saldo corretto a mano: da qui in poi è quello giusto. Solo se è
+        # cambiato davvero — il form lo rimanda anche quando si cambia il nome,
+        # e riallineare lì nasconderebbe uno sfasamento vero.
+        if "saldo" in update_data and update_data["saldo"] != saldo_prima:
+            allinea_saldo_base(db, db_conto)
 
         db.commit()
         db.refresh(db_conto)
@@ -219,6 +234,10 @@ def delete_conto(
 
         db_conto.deleted_at = now
 
+        # Movimenti spostati o nascosti fra conti: la base dei saldi cambia
+        # senza errori, quindi si riparte da qui (vedi services.verifica_saldi).
+        allinea_saldi_base_utente(db, current_user_id)
+
         db.commit()
         return None
     except Exception:
@@ -265,6 +284,77 @@ def _sposta_su(db: Session, user_id: int, sorgenti: list[int], target: Conto):
         Debito.user_id == user_id,
         Debito.conto_id.in_(sorgenti),
     ).update({"conto_id": target.id}, synchronize_session=False)
+
+
+@router.get("/verifica-saldi", response_model=list[VerificaSaldoOut])
+def get_verifica_saldi(
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """I conti il cui saldo non torna con i movimenti registrati.
+
+    Lista vuota = tutto in ordine. Un conto mai controllato viene fotografato
+    adesso e non compare: è il suo punto di partenza.
+    """
+    try:
+        discrepanze = verifica_saldi(db, current_user_id)
+        db.commit()  # salva le basi appena fotografate
+        return discrepanze
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to verify account balances",
+        )
+
+
+@router.post("/{conto_id}/correggi-saldo", response_model=ContoOut)
+def correggi_saldo(
+    conto_id: int,
+    db: Session = Depends(get_db),
+    current_user_id: int = Depends(auth.get_current_user_id),
+):
+    """Riporta il saldo a quello che dicono i movimenti.
+
+    È l'uscita dal "saldo fuori sincrono": se invece il saldo giusto è quello
+    attuale, basta reimpostarlo dal form del conto, che riallinea la base.
+    """
+    db_conto = (
+        db.query(Conto)
+        .filter(
+            Conto.id == conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+    if not db_conto:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Account not found"
+        )
+
+    try:
+        riga = next(
+            (
+                r
+                for r in verifica_saldi(db, current_user_id)
+                if r["conto_id"] == db_conto.id
+            ),
+            None,
+        )
+        if riga is not None:
+            db_conto.saldo = riga["saldo_atteso"]
+
+        db.commit()
+        db.refresh(db_conto)
+        return db_conto
+    except Exception:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Failed to correct the account balance",
+        )
 
 
 @router.get("/patrimonio", response_model=list[PatrimonioOut])
@@ -351,6 +441,10 @@ def consolida_conti(
             target.conto_sorgente_id = None
             target.ricarica_automatica = False
 
+        # Movimenti spostati o nascosti fra conti: la base dei saldi cambia
+        # senza errori, quindi si riparte da qui (vedi services.verifica_saldi).
+        allinea_saldi_base_utente(db, current_user_id)
+
         db.commit()
         db.refresh(target)
         return target
@@ -424,6 +518,10 @@ def rinuncia_ai_conti(
             target.conto_sorgente_id = None
             target.ricarica_automatica = False
 
+        # Movimenti spostati o nascosti fra conti: la base dei saldi cambia
+        # senza errori, quindi si riparte da qui (vedi services.verifica_saldi).
+        allinea_saldi_base_utente(db, current_user_id)
+
         db.commit()
         db.refresh(target)
         return target
@@ -491,6 +589,10 @@ def assorbi_conto_virtuale(
             target.saldo += conto.saldo
             conto.deleted_at = now
 
+        # Movimenti spostati o nascosti fra conti: la base dei saldi cambia
+        # senza errori, quindi si riparte da qui (vedi services.verifica_saldi).
+        allinea_saldi_base_utente(db, current_user_id)
+
         db.commit()
         db.refresh(target)
         return target
@@ -541,6 +643,10 @@ def restore_conto(
         ).update({"deleted_at": None}, synchronize_session=False)
 
         db_conto.deleted_at = None
+
+        # Movimenti spostati o nascosti fra conti: la base dei saldi cambia
+        # senza errori, quindi si riparte da qui (vedi services.verifica_saldi).
+        allinea_saldi_base_utente(db, current_user_id)
 
         db.commit()
         db.refresh(db_conto)

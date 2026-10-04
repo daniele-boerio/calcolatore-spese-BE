@@ -20,11 +20,14 @@ Alembic migrations, JWT bearer auth, APScheduler background jobs.
 
 ## Running things (Windows: `python` is not on PATH, use the venv)
 
+Always `python -m <tool>`: the `.exe` launchers in `venv/Scripts` exit silently
+because the project path contains a space.
+
 ```bash
 venv/Scripts/python.exe -m pytest -q
-venv/Scripts/alembic.exe revision -m "desc" --autogenerate
-venv/Scripts/alembic.exe upgrade head
-venv/Scripts/uvicorn.exe main:app --reload
+venv/Scripts/python.exe -m alembic revision -m "desc" --autogenerate
+venv/Scripts/python.exe -m alembic upgrade head
+venv/Scripts/python.exe -m uvicorn main:app --reload
 ```
 - `database.py` — engine + `SessionLocal` + the `get_db()` dependency.
 - `auth.py` — `get_current_user_id` dependency; bearer JWT.
@@ -58,6 +61,34 @@ def create_xxx(
 - Pydantic v2 only: `model_dump(exclude_unset=True)` for partial updates,
   `field_validator`, `ConfigDict(from_attributes=True)`. No v1 `.dict()` / `Config` class.
 
+## Balances (`Conto.saldo`)
+
+- The balance is updated incrementally by many paths. **Never** write
+  `conto.saldo += ...` for a transaction: call
+  `services.applica_effetto_saldo(db, transazione, user_id, segno)` (segno=-1 to
+  revert). It uses `effetto_sul_conto`, the same rule used to read history back.
+- `Conto.saldo_base` = balance minus the effect of active transactions. Transaction
+  operations must leave it unchanged; `task_verifica_saldi` (nightly) and
+  `GET /conti/verifica-saldi` report accounts where it moved,
+  `POST /conti/{id}/correggi-saldo` fixes them.
+- Code that sets a balance **by hand** (create/edit account, consolidate, absorb,
+  delete/restore an account) must call `allinea_saldo_base` /
+  `allinea_saldi_base_utente` before commit, or the check raises a false alarm.
+- `tests/test_saldi_e_idempotenza.py` walks every balance path and asserts the check
+  stays clean: extend it when you add a new one.
+
+## Idempotency and scheduled jobs
+
+- `POST /transazioni` honours the `Idempotency-Key` header (unique per user): a
+  repeated key returns the transaction already created. New create endpoints that
+  the offline queue may retry should do the same.
+- Jobs that write money (recurrences, auto top-up) re-select each row with
+  `.with_for_update(skip_locked=True)` and re-check it is still due before acting,
+  then commit per row: two scheduler processes cannot double-execute.
+- Recurrences are executed with their **due date**, catching up every missed
+  occurrence; they stop at `data_fine` / `rate_rimanenti` / when the linked debt is
+  paid off. `importo_variabile` ones are never auto-executed.
+
 ## FastAPI performance notes (apply when relevant)
 
 - For aggregates over a filtered query, push work to SQL with `func.sum(...)` /
@@ -80,7 +111,8 @@ def create_xxx(
 ## Don't
 
 - `pytest` **is** wired up now (`pytest.ini` + `tests/`, in-memory SQLite via
-  `tests/conftest.py`); run it after BE changes. Still absent: `black`/`ruff` and CI —
+  `tests/conftest.py`); run it after BE changes (CI runs it too: `.github/workflows/ci.yml`). Still absent:
+  `black`/`ruff` and pre-commit —
   don't claim those exist; add the dependency explicitly if you introduce them.
 - Don't rename domains or restructure modules without calling it out — the FE depends
   on these route shapes and the swagger contract.

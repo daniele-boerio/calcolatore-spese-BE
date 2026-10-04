@@ -16,7 +16,8 @@ Panoramica architettura
 Regole di stile e pratiche consigliate
 
 - Python: mantenere compatibilità con Python 3.10+ e usare type hints ovunque.
-- Formatter, linter, mypy, pre-commit e CI **non** sono configurati: non darli per scontati; se ne introduci uno, aggiungi la dipendenza esplicitamente.
+- Formatter, linter, mypy e pre-commit **non** sono configurati: non darli per scontati; se ne introduci uno, aggiungi la dipendenza esplicitamente. La CI (GitHub Actions) lancia `pytest` e controlla che ci sia una sola head Alembic.
+- Saldi: i movimenti muovono i saldi solo con `services.applica_effetto_saldo`; chi imposta un saldo a mano chiama `allinea_saldo_base` (vedi `CLAUDE.md`).
 - Logging: `logger = logging.getLogger(__name__)` e `logger.exception(...)` nei blocchi `except`; mai `print`.
 - Sicurezza: ogni query filtrata per `user_id`; conti e transazioni sono soft-delete (`deleted_at`), le letture li escludono.
 - Soldi: sempre `Decimal` (`Decimal(str(x))`, quantize a `0.01`), mai `float`.
@@ -49,13 +50,13 @@ Suggerimenti per le migrazioni
 
 CI & Quality
 
-- Unico gate configurato: `pytest`. CI e pre-commit non esistono ancora.
+- Gate: `pytest`, lanciato anche dalla CI (`.github/workflows/ci.yml`). Pre-commit non esiste ancora.
 
 Esempi di comandi utili
 
 - Installare dipendenze: `venv/Scripts/python.exe -m pip install -r requirements.txt -r requirements-dev.txt`
-- Creare migration: `venv/Scripts/alembic.exe revision -m "descrizione" --autogenerate`
-- Applicare migration: `venv/Scripts/alembic.exe upgrade head`
+- Creare migration: `venv/Scripts/python.exe -m alembic revision -m "descrizione" --autogenerate`
+- Applicare migration: `venv/Scripts/python.exe -m alembic upgrade head`
 - Eseguire tests: `venv/Scripts/python.exe -m pytest -q`
 
 Linee guida per PR

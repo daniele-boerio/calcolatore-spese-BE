@@ -1,4 +1,4 @@
-from pydantic import BaseModel, field_validator, ConfigDict
+from pydantic import BaseModel, Field, field_validator, ConfigDict
 from typing import Optional, List
 from datetime import datetime, date
 from enum import Enum
@@ -21,7 +21,9 @@ class TipoTransazione(str, Enum):
 class TransazioneBase(BaseModel):
     importo: Decimal
     tipo: TipoTransazione
-    data: date = date.today()
+    # default_factory e non `= date.today()`: quella si valuta una volta sola,
+    # all'avvio del server, e una transazione senza data prendeva quel giorno.
+    data: date = Field(default_factory=date.today)
     descrizione: Optional[str] = None
     conto_id: int
     # Conto destinatario, valorizzato solo per i giroconti (tipo RICARICA)

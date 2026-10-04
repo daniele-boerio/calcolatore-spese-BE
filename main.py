@@ -17,6 +17,7 @@ from services import (
     task_transazioni_ricorrenti,
     task_ricarica_automatica_conti,
     task_sync_bank_connectors,
+    task_verifica_saldi,
 )
 from routers import (
     auth,
@@ -40,10 +41,16 @@ logger = logging.getLogger(__name__)
 
 # Lo scheduler gira IN-PROCESS: se l'app viene avviata con più worker
 # (uvicorn/gunicorn --workers N) o scalata su più repliche, ogni processo ne
-# avvia una copia e i job cron partono N volte (transazioni ricorrenti,
-# ricariche e aggiornamenti prezzi duplicati). Deve quindi essere eseguito da
-# un solo processo: il gate qui sotto lo tiene attivo di default (deploy a
-# singolo worker) e va messo a "false" su tutte le repliche tranne una.
+# avvia una copia e i job cron partono N volte. Il gate qui sotto lo tiene
+# attivo di default (deploy a singolo worker) e va messo a "false" su tutte le
+# repliche tranne una.
+#
+# Come rete di sicurezza, i job che scrivono soldi (ricorrenze, ricarica
+# automatica) rileggono e bloccano ogni riga prima di toccarla (`FOR UPDATE SKIP
+# LOCKED` su Postgres): anche con il gate sbagliato non registrano due volte la
+# stessa occorrenza. Gli altri job sono idempotenti (snapshot, prezzi, verifica
+# saldi) o limitati dal provider (sync bancaria), quindi duplicarli spreca ma
+# non corrompe.
 RUN_SCHEDULER = os.getenv("RUN_SCHEDULER", "true").lower() in ("1", "true", "yes")
 
 scheduler = BackgroundScheduler()
@@ -53,6 +60,8 @@ scheduler.add_job(task_transazioni_ricorrenti, "cron", hour=3, minute=0)
 # è l'ultima scattata, ed è quella che serve al confronto.
 scheduler.add_job(task_snapshot_patrimonio, "cron", hour=1, minute=30)
 scheduler.add_job(task_ricarica_automatica_conti, "cron", hour=4, minute=0)
+# Dopo ricorrenze e ricariche: controlla che ogni saldo torni con i movimenti.
+scheduler.add_job(task_verifica_saldi, "cron", hour=4, minute=30)
 # Ogni 6 ore (4 volte/giorno): le API AIS (PSD2) limitano gli accessi non
 # presidiati, quindi una sync oraria genera 429 "Too Many Requests".
 scheduler.add_job(task_sync_bank_connectors, "cron", hour="*/6")

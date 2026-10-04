@@ -102,6 +102,19 @@ class PatrimonioOut(BaseModel):
     totale: Decimal
 
 
+class VerificaSaldoOut(BaseModel):
+    """Un conto il cui saldo non torna con i movimenti registrati."""
+
+    conto_id: int
+    nome: str
+    saldo: Decimal
+    # Il saldo che avrebbe se ogni movimento l'avesse mosso giusto
+    saldo_atteso: Decimal
+    # Base ricalcolata meno base fotografata: quanto il saldo si è spostato
+    # senza un movimento che lo giustifichi.
+    differenza: Decimal
+
+
 class PeriodoOut(BaseModel):
     start: date
     end: date

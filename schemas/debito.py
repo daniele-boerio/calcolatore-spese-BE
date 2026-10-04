@@ -43,6 +43,8 @@ class DebitoOut(DebitoBase):
     # Mese in cui il debito si chiude al ritmo tenuto finora ("2027-06").
     # Nullo quando un ritmo non c'è: con meno di due pagamenti non si stima.
     fine_stimata: Optional[str] = None
+    # Rata ricorrente attiva che paga il debito (nulla se si paga a mano)
+    ricorrenza_id: Optional[int] = None
     creationDate: datetime
     lastUpdate: datetime
 

@@ -1,14 +1,65 @@
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
-from typing import List
+from typing import List, Optional
 from database import get_db
 import auth
-from models import Ricorrenza, Conto
-from schemas import RicorrenzaOut, RicorrenzaCreate, RicorrenzaUpdate, RicorrenzaFilters
+from models import Ricorrenza, Conto, Debito
+from schemas import (
+    RicorrenzaOut,
+    RicorrenzaCreate,
+    RicorrenzaUpdate,
+    RicorrenzaFilters,
+    RicorrenzaEseguiRequest,
+)
 from services import apply_filters_and_sort, esegui_ricorrenza
+from routers.transazioni import resolve_tassonomia
 from datetime import date
 
 router = APIRouter(prefix="/ricorrenze", tags=["Ricorrenze"])
+
+
+def verifica_riferimenti(db: Session, user_id: int, dati: dict, attuale=None):
+    """Categoria, sottocategoria, tag e debito devono essere dell'utente.
+
+    Gli id arrivano dal client e la ricorrenza li copia su ogni transazione che
+    genera: senza controllo, una ricorrenza potrebbe scrivere ogni mese sulla
+    tassonomia o sul debito di un altro utente. `attuale` è la ricorrenza in
+    modifica, per completare i campi che il payload non tocca.
+    """
+
+    def valore(campo):
+        if campo in dati:
+            return dati[campo]
+        return getattr(attuale, campo, None)
+
+    resolve_tassonomia(
+        db,
+        user_id,
+        valore("categoria_id"),
+        valore("sottocategoria_id"),
+        valore("tag_id"),
+    )
+
+    debito_id = valore("debito_id")
+    if debito_id is not None:
+        debito = (
+            db.query(Debito)
+            .filter(Debito.id == debito_id, Debito.user_id == user_id)
+            .first()
+        )
+        if not debito:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Debt not found or not authorized",
+            )
+
+    data_fine = valore("data_fine")
+    prossima = valore("prossima_esecuzione")
+    if data_fine is not None and prossima is not None and data_fine < prossima:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="The end date cannot precede the next execution",
+        )
 
 
 @router.post("", response_model=RicorrenzaOut)
@@ -20,7 +71,11 @@ def create_ricorrenza(
     # 1. Verify that the account belongs to the user
     conto = (
         db.query(Conto)
-        .filter(Conto.id == ricorrenza.conto_id, Conto.user_id == current_user_id)
+        .filter(
+            Conto.id == ricorrenza.conto_id,
+            Conto.user_id == current_user_id,
+            Conto.deleted_at.is_(None),
+        )
         .first()
     )
 
@@ -29,6 +84,8 @@ def create_ricorrenza(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Account not found or unauthorized",
         )
+
+    verifica_riferimenti(db, current_user_id, ricorrenza.model_dump())
 
     try:
         new_ric = Ricorrenza(**ricorrenza.model_dump(), user_id=current_user_id)
@@ -90,6 +147,7 @@ def update_ricorrenza(
             .filter(
                 Conto.id == update_dict["conto_id"],
                 Conto.user_id == current_user_id,
+                Conto.deleted_at.is_(None),
             )
             .first()
         )
@@ -98,6 +156,8 @@ def update_ricorrenza(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail="Account not found or unauthorized",
             )
+
+    verifica_riferimenti(db, current_user_id, update_dict, attuale=db_ric)
 
     try:
         for key, value in update_dict.items():
@@ -117,6 +177,7 @@ def update_ricorrenza(
 @router.post("/{ricorrenza_id}/esegui", response_model=RicorrenzaOut)
 def esegui_ricorrenza_ora(
     ricorrenza_id: int,
+    body: Optional[RicorrenzaEseguiRequest] = None,
     db: Session = Depends(get_db),
     current_user_id: int = Depends(auth.get_current_user_id),
 ):
@@ -126,6 +187,10 @@ def esegui_ricorrenza_ora(
     a cavallo di mezzanotte): la ricorrenza resta indietro e da qui la si
     sblocca a mano. Non anticipa niente — una ricorrenza non ancora scaduta
     viene rifiutata — quindi non può fare doppioni con il task.
+
+    Registra una sola occorrenza, la più vecchia: se ne mancano altre, la
+    ricorrenza resta fra le scadute e si registra di nuovo. Per quelle a
+    importo variabile è l'unico modo di registrarle, con l'importo vero.
     """
     db_ric = (
         db.query(Ricorrenza)
@@ -153,8 +218,16 @@ def esegui_ricorrenza_ora(
             detail="This recurring transaction is not due yet",
         )
 
+    importo = body.importo if body is not None else None
+
+    if db_ric.importo_variabile and importo is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A variable recurring transaction needs the actual amount",
+        )
+
     try:
-        esegui_ricorrenza(db, db_ric, today)
+        esegui_ricorrenza(db, db_ric, today, importo=importo)
         db.commit()
         db.refresh(db_ric)
         return db_ric

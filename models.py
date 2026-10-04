@@ -140,6 +140,14 @@ class Conto(Base):
     # irreversibilmente tutte le transazioni).
     deleted_at = Column(DateTime, nullable=True, index=True)
 
+    # Base del saldo: saldo meno l'effetto di tutti i movimenti attivi. Le
+    # operazioni sui movimenti la lasciano invariata per costruzione; cambia
+    # solo quando l'utente corregge il saldo a mano. Se il ricalcolo notturno
+    # la trova spostata, qualche percorso ha mosso il saldo senza un movimento
+    # (o un movimento senza il saldo): è il segnale di un saldo andato fuori
+    # sincrono. NULL = non ancora fotografata.
+    saldo_base = Column(Numeric(10, 2), nullable=True)
+
     bank_connector_provider = Column(String, nullable=True)
     bank_connector_account_id = Column(String, nullable=True)
     bank_connector_institution_id = Column(String, nullable=True)
@@ -320,6 +328,11 @@ class Transazione(Base):
 
     importo_netto = Column(Numeric(10, 2), nullable=True)
 
+    # Chiave scelta dal client per ogni salvataggio. Se la stessa richiesta
+    # arriva due volte (rete caduta dopo il commit, coda offline che riprova),
+    # la seconda restituisce la transazione già creata invece di duplicarla.
+    idempotency_key = Column(String(64), nullable=True)
+
     # Soft-delete: marcata insieme al conto quando quest'ultimo viene "cancellato".
     # Tutte le letture/aggregati escludono le transazioni con deleted_at valorizzato.
     deleted_at = Column(DateTime, nullable=True, index=True)
@@ -464,6 +477,20 @@ class Ricorrenza(Base):
     )
     tag_id = Column(Integer, ForeignKey("tags.id", ondelete="SET NULL"), nullable=True)
 
+    # Fine della ricorrenza: dopo questa data non scatta più. NULL = senza fine.
+    data_fine = Column(Date, nullable=True)
+    # Quante occorrenze mancano (rate di un finanziamento). Scende a ogni
+    # esecuzione; a zero la ricorrenza si sospende. NULL = illimitate.
+    rate_rimanenti = Column(Integer, nullable=True)
+    # Importo che cambia ogni volta (bollette): lo scheduler non la registra da
+    # sé, resta "da confermare" finché l'utente non scrive l'importo vero.
+    importo_variabile = Column(Boolean, nullable=False, default=False)
+    # Rata di un debito: ogni esecuzione scala il residuo, e a debito estinto la
+    # ricorrenza si sospende.
+    debito_id = Column(
+        Integer, ForeignKey("debiti.id", ondelete="SET NULL"), nullable=True
+    )
+
     creationDate = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     lastUpdate = Column(
         DateTime,
@@ -489,3 +516,9 @@ Index("ix_ricorrenze_user_id", Ricorrenza.user_id)
 Index("ix_bank_proposals_user_id", BankTransactionProposal.user_id)
 Index("ix_transazioni_user_id_data", Transazione.user_id, Transazione.data)
 Index("ix_transazioni_conto_id", Transazione.conto_id)
+Index(
+    "ux_transazioni_user_idempotency",
+    Transazione.user_id,
+    Transazione.idempotency_key,
+    unique=True,
+)
