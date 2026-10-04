@@ -4,7 +4,7 @@ from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from database import get_db
 import auth
-from models import Categoria, Sottocategoria, Transazione, Ricorrenza
+from models import Categoria, Sottocategoria, Transazione, Ricorrenza, Tag
 from schemas import (
     CategoriaCreate,
     CategoriaUpdate,
@@ -240,6 +240,32 @@ def migrate_transactions(
                 detail="La nuova sottocategoria specificata non esiste, non appartiene alla nuova categoria, o non ti appartiene.",
             )
 
+    # I tag arrivano dal client come le categorie: vanno verificati allo
+    # stesso modo, altrimenti si potrebbe scrivere il tag di un altro utente.
+    for tag_id in (payload.old_tag_id, payload.new_tag_id):
+        if tag_id is not None:
+            tag = (
+                db.query(Tag)
+                .filter(Tag.id == tag_id, Tag.user_id == current_user_id)
+                .first()
+            )
+            if not tag:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail="Il tag specificato non esiste o non ti appartiene.",
+                )
+
+    # Campi scritti su transazioni e ricorrenze spostate.
+    nuovi_valori = {
+        "categoria_id": payload.new_categoria_id,
+        "sottocategoria_id": payload.new_sottocategoria_id,
+        "lastUpdate": datetime.now(timezone.utc),
+    }
+    if payload.tag_action == "set":
+        nuovi_valori["tag_id"] = payload.new_tag_id
+    elif payload.tag_action == "clear":
+        nuovi_valori["tag_id"] = None
+
     try:
         # 2. Aggiornamento Transazioni
         tx_query = db.query(Transazione).filter(
@@ -257,14 +283,10 @@ def migrate_transactions(
             # delle altre sottocategorie figlie di questa categoria.
             tx_query = tx_query.filter(Transazione.sottocategoria_id.is_(None))
 
-        tx_updated = tx_query.update(
-            {
-                "categoria_id": payload.new_categoria_id,
-                "sottocategoria_id": payload.new_sottocategoria_id,
-                "lastUpdate": datetime.now(timezone.utc),
-            },
-            synchronize_session=False,
-        )
+        if payload.old_tag_id is not None:
+            tx_query = tx_query.filter(Transazione.tag_id == payload.old_tag_id)
+
+        tx_updated = tx_query.update(nuovi_valori, synchronize_session=False)
 
         # 3. Aggiornamento Ricorrenze
         ric_query = db.query(Ricorrenza).filter(
@@ -278,14 +300,10 @@ def migrate_transactions(
         else:
             ric_query = ric_query.filter(Ricorrenza.sottocategoria_id.is_(None))
 
-        ric_updated = ric_query.update(
-            {
-                "categoria_id": payload.new_categoria_id,
-                "sottocategoria_id": payload.new_sottocategoria_id,
-                "lastUpdate": datetime.now(timezone.utc),
-            },
-            synchronize_session=False,
-        )
+        if payload.old_tag_id is not None:
+            ric_query = ric_query.filter(Ricorrenza.tag_id == payload.old_tag_id)
+
+        ric_updated = ric_query.update(nuovi_valori, synchronize_session=False)
 
         db.commit()
         return {
@@ -294,9 +312,12 @@ def migrate_transactions(
             "ricorrenze_aggiornate": ric_updated,
         }
 
-    except Exception as e:
+    except Exception:
         db.rollback()
+        # Il dettaglio dell'eccezione resta nei log: al client non va il testo
+        # grezzo del database.
+        logger.exception("Errore durante la migrazione delle categorie")
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Errore durante la migrazione: {str(e)}",
+            detail="Errore durante la migrazione.",
         )

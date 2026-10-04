@@ -1,8 +1,8 @@
 from datetime import datetime
 from decimal import Decimal
 from fastapi import Query
-from pydantic import BaseModel, ConfigDict, field_validator  # Aggiornato a V2
-from typing import List, Optional
+from pydantic import BaseModel, ConfigDict, field_validator, model_validator  # Aggiornato a V2
+from typing import List, Literal, Optional
 from .sottocategoria import SottocategoriaCreate, SottocategoriaOut
 
 
@@ -71,7 +71,22 @@ class CategoriaMigrate(BaseModel):
     old_sottocategoria_id: Optional[int] = None
     new_categoria_id: int
     new_sottocategoria_id: Optional[int] = None
+    # Vincolo sull'origine: se indicato, si spostano solo i movimenti con
+    # questo tag. Assente = tutti, con o senza tag (comportamento storico).
+    old_tag_id: Optional[int] = None
+    # Cosa succede al tag dei movimenti spostati:
+    # - "keep": resta quello che avevano (default, comportamento storico);
+    # - "set":  diventa `new_tag_id`;
+    # - "clear": viene tolto.
+    # Tre stati espliciti perché un solo `new_tag_id` facoltativo non
+    # distinguerebbe "lascialo com'è" da "toglilo".
+    tag_action: Literal["keep", "set", "clear"] = "keep"
+    new_tag_id: Optional[int] = None
 
-    def model_dump(self):
-        # Mantiene la compatibilità con la tua funzione di filtraggio
-        return {k: v for k, v in self.__dict__.items() if v is not None}
+    @model_validator(mode="after")
+    def check_new_tag(self):
+        if self.tag_action == "set" and self.new_tag_id is None:
+            raise ValueError("new_tag_id is required when tag_action is 'set'")
+        if self.tag_action != "set" and self.new_tag_id is not None:
+            raise ValueError("new_tag_id is only allowed when tag_action is 'set'")
+        return self
