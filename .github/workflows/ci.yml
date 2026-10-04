@@ -13,6 +13,16 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # `database.py` compone l'URL di Postgres dalle variabili d'ambiente già
+    # all'import (in locale le prende dal .env, che in CI non c'è): senza, la
+    # porta diventa "None" e l'import fallisce. Valori fittizi bastano — i test
+    # usano SQLite in memoria e creare l'engine non apre connessioni.
+    env:
+      DB_USER: ci
+      DB_PASSWORD: ci
+      DB_HOST: localhost
+      DB_PORT: "5432"
+      DB_NAME: ci
     steps:
       - uses: actions/checkout@v4
 
