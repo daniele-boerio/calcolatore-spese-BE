@@ -12,8 +12,20 @@ Alembic migrations, JWT bearer auth, APScheduler background jobs.
   `…Out`. Re-exported from `schemas/__init__.py`.
 - `models.py` — SQLAlchemy models (single module).
 - `services.py` — **single** module of reusable logic + scheduler tasks + the shared
-  `apply_filters_and_sort(query, model, filters)` helper. (Note: `PROJECT_SKILL.md`
-  mentions a `services/` package — it does not exist; logic lives in `services.py`.)
+  `apply_filters_and_sort(query, model, filters)` helper. There is no `services/`
+  package.
+- `rate_limit.py` — shared slowapi `limiter` for rate-limited endpoints.
+- `tests/` — pytest on in-memory SQLite (`db_session` fixture in `tests/conftest.py`);
+  tests call endpoint functions directly, the auth flow uses `TestClient`.
+
+## Running things (Windows: `python` is not on PATH, use the venv)
+
+```bash
+venv/Scripts/python.exe -m pytest -q
+venv/Scripts/alembic.exe revision -m "desc" --autogenerate
+venv/Scripts/alembic.exe upgrade head
+venv/Scripts/uvicorn.exe main:app --reload
+```
 - `database.py` — engine + `SessionLocal` + the `get_db()` dependency.
 - `auth.py` — `get_current_user_id` dependency; bearer JWT.
 
@@ -30,7 +42,12 @@ def create_xxx(
 ```
 
 - **Every query is user-scoped:** `.filter(Model.user_id == current_user_id)`. A
-  missing user filter is a data-leak bug — never omit it.
+  missing user filter is a data-leak bug — never omit it. That includes lookups of
+  related rows (destination conto, parent transaction, categoria/sottocategoria/tag —
+  see `resolve_tassonomia` in `routers/transazioni.py`).
+- **Soft-delete:** `Conto` and `Transazione` carry `deleted_at`. Reads and aggregates
+  filter `deleted_at.is_(None)`; deleting a conto is a reversible soft-delete, never
+  a hard cascade.
 - **Ownership before mutation:** load the row scoped to the user, `404` if absent,
   then act. Validation failures → `HTTPException(status_code=400, ...)`.
 - **Transactions:** wrap multi-step writes in `try / db.commit() / except: db.rollback()`,
